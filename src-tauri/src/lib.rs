@@ -5,7 +5,60 @@ use std::env;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tauri::{Emitter, AppHandle, async_runtime};
+
+const BLOCK_COOLDOWN: Duration = Duration::from_secs(60);
+static BLOCKED_UNTIL: Mutex<Option<Instant>> = Mutex::new(None);
+
+fn text_is_block(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("sign in to confirm")
+        || lower.contains("not a bot")
+        || lower.contains("não é um robô")
+        || lower.contains("nao e um robo")
+        || lower.contains("too many requests")
+        || lower.contains("http error 429")
+}
+
+fn remember_block(text: &str) {
+    if text_is_block(text) {
+        if let Ok(mut until) = BLOCKED_UNTIL.lock() {
+            *until = Some(Instant::now() + BLOCK_COOLDOWN);
+        }
+    }
+}
+
+fn cooldown_remaining() -> Duration {
+    BLOCKED_UNTIL
+        .lock()
+        .ok()
+        .and_then(|guard| *guard)
+        .map(|until| until.saturating_duration_since(Instant::now()))
+        .unwrap_or(Duration::ZERO)
+}
+
+async fn wait_out_cooldown() {
+    let wait = cooldown_remaining();
+    if wait.is_zero() {
+        return;
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        std::thread::sleep(wait);
+        let _ = tx.send(());
+    });
+    loop {
+        match rx.try_recv() {
+            Ok(_) | Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                async_runtime::spawn(async {}).await.ok();
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
+}
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -217,6 +270,7 @@ fn json_u64(value: Option<&serde_json::Value>) -> Option<u64> {
 
 fn friendly_download_error(lines: &[String]) -> String {
     let text = lines.join("\n");
+    remember_block(&text);
     if text.contains("Sign in to confirm") || text.to_lowercase().contains("not a bot") {
         return "O YouTube pediu para confirmar que você não é um robô. Entre com o Firefox e tente de novo.".to_string();
     }
@@ -661,6 +715,7 @@ fn get_ytdlp_path() -> String {
 
 #[tauri::command]
 async fn check_url_protection(url: String) -> Result<ProtectionResult, String> {
+    wait_out_cooldown().await;
     let ytdlp = get_ytdlp_path();
     
     // Usar canal para receber resultado de thread separada
@@ -704,6 +759,7 @@ async fn check_url_protection(url: String) -> Result<ProtectionResult, String> {
     
     // Verificar se precisa de login (no stderr ou stdout)
     let combined_output = format!("{} {}", stderr, stdout);
+    remember_block(&combined_output);
     
     if combined_output.contains("Sign in to confirm") || 
        combined_output.contains("Video unavailable") ||
@@ -734,6 +790,7 @@ async fn check_url_protection(url: String) -> Result<ProtectionResult, String> {
 
 #[tauri::command]
 async fn verify_cookies(url: String, cookies_path: String) -> Result<CookiesResult, String> {
+    wait_out_cooldown().await;
     let ytdlp = get_ytdlp_path();
     
     let (tx, rx) = std::sync::mpsc::channel();
@@ -859,6 +916,7 @@ fn open_firefox_youtube() -> Result<(), String> {
 #[tauri::command]
 async fn check_firefox_youtube_cookies(url: String) -> Result<CookiesResult, String> {
     // Usar yt-dlp com --cookies-from-browser firefox para verificar se tem cookies válidos
+    wait_out_cooldown().await;
     let ytdlp = get_ytdlp_path();
     
     let (tx, rx) = std::sync::mpsc::channel();
@@ -898,6 +956,7 @@ async fn check_firefox_youtube_cookies(url: String) -> Result<CookiesResult, Str
         })
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        remember_block(&stderr);
         // Verificar se ainda precisa de auth
         if stderr.contains("Sign in") || stderr.contains("Private") || stderr.contains("unavailable") {
             Ok(CookiesResult {
@@ -915,6 +974,7 @@ async fn check_firefox_youtube_cookies(url: String) -> Result<CookiesResult, Str
 
 #[tauri::command]
 async fn analyze_url(url: String, radio_limit: u32, cookies_path: Option<String>, use_browser_cookies: Option<bool>) -> Result<AnalyzeResult, String> {
+    wait_out_cooldown().await;
     let ytdlp = get_ytdlp_path();
     
     let mut args = vec![
@@ -969,6 +1029,7 @@ async fn analyze_url(url: String, radio_limit: u32, cookies_path: Option<String>
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        remember_block(&stderr);
         return Err(format!("Erro ao analisar URL: {}", stderr));
     }
 
@@ -1071,6 +1132,10 @@ async fn analyze_url(url: String, radio_limit: u32, cookies_path: Option<String>
 
 #[tauri::command]
 fn get_formats(url: String, cookies_path: Option<String>, use_browser_cookies: Option<bool>) -> Result<FormatsResult, String> {
+    let pause = cooldown_remaining();
+    if !pause.is_zero() {
+        std::thread::sleep(pause);
+    }
     // Tentar obter formatos reais do yt-dlp
     let ytdlp_path = get_ytdlp_exe_path();
     
@@ -1089,6 +1154,9 @@ fn get_formats(url: String, cookies_path: Option<String>, use_browser_cookies: O
         configure_command(&mut cmd);
         
         if let Ok(output) = cmd.output() {
+            if !output.status.success() {
+                remember_block(&String::from_utf8_lossy(&output.stderr));
+            }
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 
@@ -1193,6 +1261,19 @@ pub struct DownloadProgress {
 
 #[tauri::command]
 async fn start_download(app: AppHandle, options: DownloadOptions) -> Result<String, String> {
+    let pause = cooldown_remaining();
+    if !pause.is_zero() {
+        let _ = app.emit("download-progress", DownloadProgress {
+            status: "waiting".to_string(),
+            progress: 0.0,
+            speed: "".to_string(),
+            eta: format!("{}s", pause.as_secs()),
+            filename: "O YouTube limitou as consultas. Aguardando para tentar de novo...".to_string(),
+            current: 0,
+            total: 1,
+        });
+        wait_out_cooldown().await;
+    }
     let ytdlp = get_ytdlp_path();
     let ffmpeg_location = locate_ffmpeg()
         .map(|path| path.to_string_lossy().to_string())

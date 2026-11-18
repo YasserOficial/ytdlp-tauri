@@ -62,7 +62,7 @@ const estimatedSize = computed(() => {
 
   const knownBytes = (props.selectedItems || []).reduce((acc, item) => acc + (item.filesize || 0), 0);
   if (props.mode === "video" && knownBytes > 0) {
-    const scale = { best: 1, "1080p": 0.7, "720p": 0.4, "480p": 0.2, "360p": 0.12 }[props.quality] || 1;
+    const scale = { best: 0.65, "1080p": 0.55, "720p": 0.35, "480p": 0.2, "360p": 0.12 }[props.quality] || 0.65;
     return (knownBytes / 1024 / 1024) * scale;
   }
   
@@ -311,6 +311,14 @@ const audioQualities = computed(() => {
 </template>
 
 <style scoped>
+.step3 {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .step3 h2 {
   margin-top: 0;
   font-size: 22px;
@@ -450,6 +458,24 @@ const audioQualities = computed(() => {
   color: rgba(255, 255, 255, 0.4);
   font-size: 13px;
   margin: 0;
+}
+
+.format-selection {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.quality-selection {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.summary,
+.size-estimate {
+  flex-shrink: 0;
 }
 
 .quality-options {

@@ -19,6 +19,8 @@ const isCompleted = computed(() => {
 
 const statusText = computed(() => {
   switch (props.progress.status) {
+    case "waiting":
+      return "Aguardando para tentar de novo...";
     case "starting":
       return "Iniciando download...";
     case "downloading":
@@ -38,6 +40,8 @@ const statusText = computed(() => {
 
 const statusEmoji = computed(() => {
   switch (props.progress.status) {
+    case "waiting":
+      return "⏳";
     case "starting":
       return "🚀";
     case "downloading":
@@ -126,8 +130,11 @@ async function openDownloadsFolder() {
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: 30px;
-  min-height: 300px;
+  padding: 8px 12px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .downloading {
@@ -307,12 +314,12 @@ async function openDownloadsFolder() {
 }
 
 .completed {
-  padding: 50px 25px;
+  padding: 8px 12px;
 }
 
 .success-icon {
-  font-size: 90px;
-  margin-bottom: 25px;
+  font-size: 64px;
+  margin-bottom: 12px;
   display: block;
   filter: drop-shadow(0 0 30px rgba(0, 184, 148, 0.4));
   animation: bounce 0.6s ease;
