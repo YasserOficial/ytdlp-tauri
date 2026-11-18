@@ -117,7 +117,10 @@ fn get_app_tools_dir() -> PathBuf {
     let app_data = if cfg!(target_os = "windows") {
         env::var("LOCALAPPDATA").unwrap_or_else(|_| env::var("USERPROFILE").unwrap_or_default())
     } else {
-        env::var("HOME").unwrap_or_default()
+        env::var("XDG_DATA_HOME").unwrap_or_else(|_| {
+            let home = env::var("HOME").unwrap_or_default();
+            format!("{}/.local/share", home)
+        })
     };
     
     let tools_dir = PathBuf::from(app_data).join("ytdlp-tauri").join("tools");
@@ -139,6 +142,74 @@ fn get_ytdlp_exe_path() -> PathBuf {
     }
 }
 
+fn ffmpeg_file_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "ffmpeg.exe"
+    } else {
+        "ffmpeg"
+    }
+}
+
+fn ffprobe_file_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "ffprobe.exe"
+    } else {
+        "ffprobe"
+    }
+}
+
+fn make_executable(path: &PathBuf) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(path)
+            .map_err(|e| format!("Erro ao ler permissões: {}", e))?
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(path, perms)
+            .map_err(|e| format!("Erro ao definir permissões: {}", e))?;
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+    Ok(())
+}
+
+fn locate_ffmpeg() -> Option<PathBuf> {
+    let bundled = get_app_tools_dir().join(ffmpeg_file_name());
+    if bundled.exists() {
+        return Some(bundled);
+    }
+
+    let finder = if cfg!(target_os = "windows") { "where" } else { "which" };
+    let mut cmd = Command::new(finder);
+    cmd.arg("ffmpeg");
+    configure_command(&mut cmd);
+    let output = cmd.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let path = PathBuf::from(text.lines().next()?.trim());
+    if path.exists() { Some(path) } else { None }
+}
+
+fn find_file_named(dir: &std::path::Path, name: &str) -> Option<PathBuf> {
+    let entries = fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(found) = find_file_named(&path, name) {
+                return Some(found);
+            }
+        } else if path.file_name().and_then(|n| n.to_str()) == Some(name) {
+            return Some(path);
+        }
+    }
+    None
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct ToolsStatus {
     ytdlp_installed: bool,
@@ -152,8 +223,7 @@ pub struct ToolsStatus {
 #[tauri::command]
 async fn check_tools() -> Result<ToolsStatus, String> {
     let ytdlp_path = get_ytdlp_exe_path();
-    let tools_dir = get_app_tools_dir();
-    let ffmpeg_exe = tools_dir.join("ffmpeg.exe");
+    let ffmpeg_path = locate_ffmpeg();
 
     let mut status = ToolsStatus {
         ytdlp_installed: false,
@@ -193,8 +263,8 @@ async fn check_tools() -> Result<ToolsStatus, String> {
         }
     }
 
-    // Verificar FFmpeg
-    if ffmpeg_exe.exists() {
+    // Verificar FFmpeg do app ou do sistema
+    if let Some(ffmpeg_exe) = ffmpeg_path {
         let mut cmd = Command::new(&ffmpeg_exe);
         cmd.arg("-version");
         configure_command(&mut cmd);
@@ -261,14 +331,20 @@ async fn download_ytdlp() -> Result<(), String> {
         "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
     } else if cfg!(target_os = "macos") {
         "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
+    } else if cfg!(target_arch = "aarch64") {
+        "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux_aarch64"
     } else {
-        "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
+        "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux"
     };
 
     // Baixar arquivo
     let response = reqwest::get(url)
         .await
         .map_err(|e| format!("Erro ao baixar yt-dlp: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Erro HTTP ao baixar yt-dlp: {}", response.status()));
+    }
 
     let bytes = response.bytes()
         .await
@@ -281,35 +357,29 @@ async fn download_ytdlp() -> Result<(), String> {
     file.write_all(&bytes)
         .map_err(|e| format!("Erro ao salvar arquivo: {}", e))?;
 
-    // No Linux/Mac, dar permissão de execução
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&ytdlp_path)
-            .map_err(|e| format!("Erro ao ler permissões: {}", e))?
-            .permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&ytdlp_path, perms)
-            .map_err(|e| format!("Erro ao definir permissões: {}", e))?;
-    }
+    drop(file);
+    make_executable(&ytdlp_path)?;
 
     Ok(())
 }
 
 #[tauri::command]
 async fn download_ffmpeg() -> Result<(), String> {
+    if cfg!(target_os = "linux") {
+        return download_ffmpeg_linux().await;
+    }
+    if !cfg!(target_os = "windows") {
+        return Err("Download automático de FFmpeg não suportado neste sistema".to_string());
+    }
+
     let tools_dir = get_app_tools_dir();
-    let ffmpeg_exe = tools_dir.join("ffmpeg.exe");
-    let ffprobe_exe = tools_dir.join("ffprobe.exe");
+    let ffmpeg_exe = tools_dir.join(ffmpeg_file_name());
+    let ffprobe_exe = tools_dir.join(ffprobe_file_name());
     let zip_path = tools_dir.join("ffmpeg.zip");
 
     // URL do FFmpeg BtbN (versão mais leve, ~30MB)
     // Só baixamos ffmpeg.exe e ffprobe.exe que são necessários para yt-dlp
-    let url = if cfg!(target_os = "windows") {
-        "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
-    } else {
-        return Err("Download automático de FFmpeg só suportado no Windows por enquanto".to_string());
-    };
+    let url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip";
 
     // Cliente com timeout maior para downloads grandes
     let client = reqwest::Client::builder()
@@ -383,6 +453,75 @@ async fn download_ffmpeg() -> Result<(), String> {
         return Err("Não foi possível encontrar ffmpeg.exe e ffprobe.exe no ZIP".to_string());
     }
 
+    Ok(())
+}
+
+async fn download_ffmpeg_linux() -> Result<(), String> {
+    let tools_dir = get_app_tools_dir();
+    let archive_path = tools_dir.join("ffmpeg.tar.xz");
+    let extract_dir = tools_dir.join("ffmpeg-extract");
+    let url = if cfg!(target_arch = "aarch64") {
+        "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linuxarm64-gpl.tar.xz"
+    } else {
+        "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("Erro ao criar cliente HTTP: {}", e))?;
+
+    let response = client.get(url)
+        .send()
+        .await
+        .map_err(|e| format!("Erro ao baixar FFmpeg: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Erro HTTP: {}", response.status()));
+    }
+
+    let bytes = response.bytes()
+        .await
+        .map_err(|e| format!("Erro ao ler dados: {}", e))?;
+
+    let mut file = fs::File::create(&archive_path)
+        .map_err(|e| format!("Erro ao criar arquivo: {}", e))?;
+    file.write_all(&bytes)
+        .map_err(|e| format!("Erro ao salvar arquivo: {}", e))?;
+    drop(file);
+
+    let _ = fs::remove_dir_all(&extract_dir);
+    fs::create_dir_all(&extract_dir)
+        .map_err(|e| format!("Erro ao criar pasta temporária: {}", e))?;
+
+    let status = Command::new("tar")
+        .arg("-xJf")
+        .arg(&archive_path)
+        .arg("-C")
+        .arg(&extract_dir)
+        .status()
+        .map_err(|e| format!("Erro ao extrair FFmpeg com tar: {}", e))?;
+
+    if !status.success() {
+        return Err("Falha ao extrair o FFmpeg. O pacote xz-utils precisa estar instalado.".to_string());
+    }
+
+    let ffmpeg_src = find_file_named(&extract_dir, "ffmpeg")
+        .ok_or_else(|| "ffmpeg não encontrado no pacote".to_string())?;
+    let ffprobe_src = find_file_named(&extract_dir, "ffprobe")
+        .ok_or_else(|| "ffprobe não encontrado no pacote".to_string())?;
+
+    let ffmpeg_dest = tools_dir.join(ffmpeg_file_name());
+    let ffprobe_dest = tools_dir.join(ffprobe_file_name());
+    fs::copy(&ffmpeg_src, &ffmpeg_dest)
+        .map_err(|e| format!("Erro ao copiar ffmpeg: {}", e))?;
+    fs::copy(&ffprobe_src, &ffprobe_dest)
+        .map_err(|e| format!("Erro ao copiar ffprobe: {}", e))?;
+    make_executable(&ffmpeg_dest)?;
+    make_executable(&ffprobe_dest)?;
+
+    let _ = fs::remove_file(&archive_path);
+    let _ = fs::remove_dir_all(&extract_dir);
     Ok(())
 }
 
@@ -461,19 +600,6 @@ fn get_ytdlp_path() -> String {
         }
     }
     "yt-dlp".to_string()
-}
-
-fn get_ffmpeg_path() -> String {
-    // Retorna o caminho do ffmpeg instalado pelo app
-    let tools_dir = get_app_tools_dir();
-    let ffmpeg_exe = tools_dir.join("ffmpeg.exe");
-    
-    if ffmpeg_exe.exists() {
-        return ffmpeg_exe.to_string_lossy().to_string();
-    }
-    
-    // Fallback para ffmpeg no PATH
-    "ffmpeg".to_string()
 }
 
 #[tauri::command]
@@ -614,7 +740,11 @@ fn check_firefox_installed() -> Result<FirefoxStatus, String> {
     } else if cfg!(target_os = "macos") {
         vec!["/Applications/Firefox.app/Contents/MacOS/firefox"]
     } else {
-        vec!["/usr/bin/firefox", "/usr/bin/firefox-esr"]
+        vec![
+            "/usr/bin/firefox",
+            "/usr/bin/firefox-esr",
+            "/snap/bin/firefox",
+        ]
     };
 
     for path in possible_paths {
@@ -1005,8 +1135,9 @@ pub struct DownloadProgress {
 #[tauri::command]
 async fn start_download(app: AppHandle, options: DownloadOptions) -> Result<String, String> {
     let ytdlp = get_ytdlp_path();
-    let tools_dir = get_app_tools_dir();
-    let ffmpeg_location = tools_dir.to_string_lossy().to_string();
+    let ffmpeg_location = locate_ffmpeg()
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_else(|| get_app_tools_dir().to_string_lossy().to_string());
     
     // Construir argumentos base
     let mut args: Vec<String> = vec![
