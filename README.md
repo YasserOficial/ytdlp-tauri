@@ -7,6 +7,7 @@
 <p align="center">
   Interface gráfica para Windows e Linux que baixa vídeo e áudio com
   <a href="https://github.com/yt-dlp/yt-dlp">yt-dlp</a> e FFmpeg.
+  O mesmo fluxo existe sem janela, para script e agente.
 </p>
 
 <p align="center">
@@ -58,7 +59,9 @@ As ferramentas ficam em `%LOCALAPPDATA%\ytdlp-tauri\tools` no Windows e em `~/.l
 
 ## Uso por agentes
 
-O executável `ytdlp-tauri-agent` usa a mesma lógica da interface e escreve JSON, uma linha por evento. A última linha tem `"event":"result"`.
+O arquivo da release traz o `ytdlp-tauri-agent`, sem instalador e sem janela. No Windows ele está dentro do `.zip`. No Linux, dentro do `.tar.gz`. Os dois usos cabem nesse mesmo arquivo.
+
+Uso manual: um comando, resposta em JSON. A última linha tem `"event":"result"`.
 
 ```bash
 ytdlp-tauri-agent tools
@@ -67,22 +70,22 @@ ytdlp-tauri-agent formats "https://www.youtube.com/watch?v=..."
 ytdlp-tauri-agent download "https://www.youtube.com/watch?v=..." --mode video --quality 720p --out "~/Videos"
 ```
 
-`--firefox` usa os cookies do Firefox desta máquina. `--item` pode repetir para baixar só alguns itens da lista. `--quiet` omite o progresso. Se o yt-dlp ou o FFmpeg não estiverem instalados, o comando baixa os dois antes de continuar.
+`--firefox` usa os cookies do Firefox da máquina onde o comando roda. `--cookies` aponta um arquivo Netscape. `--item` pode repetir para baixar só alguns itens da lista. `--quiet` omite o progresso. `--radio-limit` corta a rádio. O padrão é 50. Se o yt-dlp ou o FFmpeg não estiverem instalados, o comando baixa os dois antes de continuar.
 
-No Windows o binário sai em `src-tauri/target/release/ytdlp-tauri-agent.exe`.
-
-O mesmo binário serve para os dois usos. Na linha de comando, `download`, `analyze`, `formats` e `tools` respondem JSON. Com `mcp`, ou iniciado sem argumentos e com a entrada em pipe, vira servidor MCP. As ferramentas são `check_tools`, `analyze_url`, `list_formats` e `download`.
+Servidor MCP: `ytdlp-tauri-agent mcp`. Sem argumentos, se a entrada já vier por pipe, ele também sobe como MCP. As ferramentas são `check_tools`, `analyze_url`, `list_formats` e `download`.
 
 ```json
 {
   "mcpServers": {
     "ytdlp": {
-      "command": "D:\\ytdlp-tauri\\src-tauri\\target\\release\\ytdlp-tauri-agent.exe",
+      "command": "C:\\caminho\\ytdlp-tauri-agent.exe",
       "args": ["mcp"]
     }
   }
 }
 ```
+
+No Linux, `command` é o caminho do binário `ytdlp-tauri-agent` depois de extrair o `.tar.gz`. A pasta das ferramentas é a mesma da interface.
 
 ## Desenvolvimento
 
@@ -125,9 +128,10 @@ powershell -ExecutionPolicy Bypass -File .\create-ico.ps1
 ## Estrutura
 
 ```
-src/                 interface Vue (passos do assistente)
-src-tauri/src/       comandos Rust: ferramentas, análise e download
-src-tauri/icons/     ícones do aplicativo
+src/                          interface Vue (passos do assistente)
+src-tauri/src/                comandos Rust: ferramentas, análise e download
+src-tauri/src/bin/            ytdlp-tauri-agent, uso manual e MCP
+src-tauri/icons/              ícones do aplicativo
 ```
 
 ## Aviso
