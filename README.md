@@ -35,8 +35,6 @@ Um assistente em passos: cole o link, escolha o que baixar, o formato e a pasta.
 - Acompanhar progresso, velocidade e tempo restante, e ver o erro real se o download falhar
 - Abrir a pasta quando o download termina
 
-Sites reconhecidos de forma específica: YouTube, Instagram, X (Twitter) e Vimeo. Os demais seguem o que o yt-dlp já suporta.
-
 ## Como baixar
 
 A versão atual é a **0.1.4**, em [Releases](https://github.com/YasserOficial/ytdlp-tauri/releases/tag/v0.1.4).
