@@ -1,6 +1,6 @@
 [package]
 name = "ytdlp-tauri"
-version = "0.1.0"
+version = "0.1.1"
 description = "Interface gráfica para baixar vídeo e áudio com yt-dlp"
 authors = ["Yasser"]
 edition = "2021"
