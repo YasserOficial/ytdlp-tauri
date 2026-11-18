@@ -39,12 +39,12 @@ const itemCount = computed(() => {
 // Estimativas de bitrate médio por qualidade (em kbps)
 const bitrateEstimates = {
   // Vídeo (vídeo + áudio combinados)
-  video: {
-    best: 8000,    // ~8 Mbps para 1080p+ 
-    "1080p": 5000, // ~5 Mbps
-    "720p": 2500,  // ~2.5 Mbps
-    "480p": 1000,  // ~1 Mbps
-    "360p": 500,   // ~500 kbps
+    video: {
+    best: 2500,
+    "1080p": 2500,
+    "720p": 1200,
+    "480p": 700,
+    "360p": 400,
   },
   // Áudio (kbps)
   audio: {
@@ -59,6 +59,12 @@ const bitrateEstimates = {
 // Calcular tamanho estimado em MB
 const estimatedSize = computed(() => {
   if (!props.mode || !props.quality || itemCount.value === 0) return 0;
+
+  const knownBytes = (props.selectedItems || []).reduce((acc, item) => acc + (item.filesize || 0), 0);
+  if (props.mode === "video" && knownBytes > 0) {
+    const scale = { best: 1, "1080p": 0.7, "720p": 0.4, "480p": 0.2, "360p": 0.12 }[props.quality] || 1;
+    return (knownBytes / 1024 / 1024) * scale;
+  }
   
   const bitrates = props.mode === 'audio' ? bitrateEstimates.audio : bitrateEstimates.video;
   const bitrate = bitrates[props.quality] || bitrates.best;
@@ -147,10 +153,10 @@ function selectQuality(q) {
 const videoQualities = computed(() => {
   const qualities = [
     { id: "best", label: "Melhor qualidade", desc: "Maior resolução disponível" },
-    { id: "1080p", label: "1080p (Full HD)", desc: "1920x1080" },
-    { id: "720p", label: "720p (HD)", desc: "1280x720" },
-    { id: "480p", label: "480p (SD)", desc: "854x480" },
-    { id: "360p", label: "360p", desc: "640x360" },
+    { id: "1080p", label: "1080p (Full HD)", desc: "até 1080p de altura" },
+    { id: "720p", label: "720p (HD)", desc: "até 720p de altura" },
+    { id: "480p", label: "480p (SD)", desc: "até 480p de altura" },
+    { id: "360p", label: "360p", desc: "até 360p de altura" },
   ];
   return qualities;
 });

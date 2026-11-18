@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "YT-DLP Downloader",
+        "title": "YT-DLP GUI",
         "width": 900,
         "height": 700,
         "center": true,

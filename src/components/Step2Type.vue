@@ -99,6 +99,14 @@ function selectOption(option) {
 function selectAll() {
   emit("update:selectedItems", [...props.items]);
 }
+
+function formatDuration(seconds) {
+  if (!seconds) return "";
+  const total = Math.round(seconds);
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
 </script>
 
 <template>
@@ -131,7 +139,7 @@ function selectAll() {
         <div class="type-info">
           <strong>Vídeo Único</strong>
           <p class="video-title">{{ contentInfo?.video?.title }}</p>
-          <span class="duration">{{ contentInfo?.video?.duration }}</span>
+          <span v-if="contentInfo?.video?.duration" class="duration">{{ formatDuration(contentInfo.video.duration) }}</span>
         </div>
       </div>
 

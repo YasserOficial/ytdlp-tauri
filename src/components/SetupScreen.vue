@@ -201,7 +201,7 @@ function skipUpdate() {
     </div>
     
     <div class="setup-container">
-      <h1>🎬 YT-DLP Downloader</h1>
+      <h1>🎬 YT-DLP GUI</h1>
       <p class="subtitle">Configuração Inicial</p>
 
       <!-- Verificando -->

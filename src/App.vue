@@ -237,7 +237,7 @@ function skipAuth() {
 
   <!-- Aplicação Principal -->
   <main v-else class="container">
-    <h1>🎬 YT-DLP Downloader</h1>
+    <h1>🎬 YT-DLP GUI</h1>
     
     <!-- Indicador de passos -->
     <div class="steps-indicator">
@@ -450,15 +450,22 @@ body {
   box-sizing: border-box;
 }
 
+html, body, #app {
+  height: 100%;
+  overflow: hidden;
+}
+
 .container {
   margin: 0 auto;
   padding: 25px;
   max-width: 750px;
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   position: relative;
   z-index: 1;
+  overflow: hidden;
 }
 
 h1 {
@@ -533,6 +540,8 @@ h1 {
 /* Conteúdo principal glassmorphism */
 .step-content {
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   background: rgba(255, 255, 255, 0.03);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
@@ -550,6 +559,7 @@ h1 {
   display: flex;
   justify-content: space-between;
   gap: 15px;
+  flex-shrink: 0;
 }
 
 button {

@@ -195,6 +195,62 @@ fn locate_ffmpeg() -> Option<PathBuf> {
     if path.exists() { Some(path) } else { None }
 }
 
+fn short_ffmpeg_version(line: &str) -> String {
+    let line = line.split("Copyright").next().unwrap_or(line).trim();
+    let rest = line.strip_prefix("ffmpeg version ").unwrap_or(line);
+    rest.split_whitespace().next().unwrap_or(rest).to_string()
+}
+
+fn json_u64(value: Option<&serde_json::Value>) -> Option<u64> {
+    let value = value?;
+    if let Some(number) = value.as_u64() {
+        return Some(number);
+    }
+    value.as_f64().and_then(|number| {
+        if number.is_sign_negative() {
+            None
+        } else {
+            Some(number.round() as u64)
+        }
+    })
+}
+
+fn friendly_download_error(lines: &[String]) -> String {
+    let text = lines.join("\n");
+    if text.contains("Sign in to confirm") || text.to_lowercase().contains("not a bot") {
+        return "O YouTube pediu para confirmar que você não é um robô. Entre com o Firefox e tente de novo.".to_string();
+    }
+    let mut picked: Vec<&str> = lines
+        .iter()
+        .filter(|line| {
+            let lower = line.to_lowercase();
+            lower.contains("error") || lower.contains("ffmpeg") || lower.contains("sign in")
+        })
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .collect();
+    if picked.is_empty() {
+        picked = lines.iter().rev().take(6).map(|line| line.trim()).filter(|line| !line.is_empty()).collect();
+        picked.reverse();
+    }
+    if picked.len() > 6 {
+        picked = picked[picked.len() - 6..].to_vec();
+    }
+    if picked.is_empty() {
+        "O download terminou com erro.".to_string()
+    } else {
+        format!("O download terminou com erro:\n{}", picked.join("\n"))
+    }
+}
+
+fn remove_partial_outputs(paths: &[String]) {
+    for path in paths {
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(format!("{path}.part"));
+        let _ = fs::remove_file(format!("{path}.ytdl"));
+    }
+}
+
 fn find_file_named(dir: &std::path::Path, name: &str) -> Option<PathBuf> {
     let entries = fs::read_dir(dir).ok()?;
     for entry in entries.flatten() {
@@ -271,9 +327,9 @@ async fn check_tools() -> Result<ToolsStatus, String> {
         if let Ok(output) = cmd.output() {
             if output.status.success() {
                 let version_str = String::from_utf8_lossy(&output.stdout);
-                let version = version_str.lines().next().unwrap_or("").to_string();
+                let version = version_str.lines().next().unwrap_or("");
                 status.ffmpeg_installed = true;
-                status.ffmpeg_version = Some(version);
+                status.ffmpeg_version = Some(short_ffmpeg_version(version));
             }
         }
     }
@@ -545,6 +601,7 @@ pub struct VideoItem {
     duration: Option<u64>,
     channel: Option<String>,
     thumbnail: Option<String>,
+    filesize: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -981,10 +1038,11 @@ async fn analyze_url(url: String, radio_limit: u32, cookies_path: Option<String>
                     id: id.to_string(),
                     title: entry.get("title").and_then(|t| t.as_str()).unwrap_or("Sem título").to_string(),
                     url: item_url,
-                    duration: entry.get("duration").and_then(|d| d.as_u64()),
+                    duration: json_u64(entry.get("duration")),
                     channel: entry.get("channel").and_then(|c| c.as_str()).map(|s| s.to_string())
                         .or_else(|| entry.get("uploader").and_then(|u| u.as_str()).map(|s| s.to_string())),
                     thumbnail,
+                    filesize: json_u64(entry.get("filesize")).or_else(|| json_u64(entry.get("filesize_approx"))),
                 });
             }
         }
@@ -995,9 +1053,10 @@ async fn analyze_url(url: String, radio_limit: u32, cookies_path: Option<String>
                 id: id.to_string(),
                 title: json.get("title").and_then(|t| t.as_str()).unwrap_or("Sem título").to_string(),
                 url: url_clone.clone(),
-                duration: json.get("duration").and_then(|d| d.as_u64()),
+                duration: json_u64(json.get("duration")),
                 channel: json.get("channel").and_then(|c| c.as_str()).map(|s| s.to_string()),
                 thumbnail: json.get("thumbnail").and_then(|t| t.as_str()).map(|s| s.to_string()),
+                filesize: json_u64(json.get("filesize")).or_else(|| json_u64(json.get("filesize_approx"))),
             });
         }
     }
@@ -1271,10 +1330,23 @@ async fn start_download(app: AppHandle, options: DownloadOptions) -> Result<Stri
         .map_err(|e| format!("Erro ao executar yt-dlp: {}", e))?;
     
     let stdout = child.stdout.take().ok_or("Falha ao capturar stdout")?;
+    let stderr = child.stderr.take().ok_or("Falha ao capturar stderr")?;
+    let stderr_task = std::thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        let mut lines = Vec::new();
+        for line in reader.lines().flatten() {
+            lines.push(line);
+            if lines.len() > 80 {
+                lines.remove(0);
+            }
+        }
+        lines
+    });
     let reader = BufReader::new(stdout);
     
     let mut current_item: u32 = 1;
     let mut last_filename = String::new();
+    let mut output_paths: Vec<String> = Vec::new();
     
     for line in reader.lines() {
         if let Ok(line) = line {
@@ -1317,6 +1389,7 @@ async fn start_download(app: AppHandle, options: DownloadOptions) -> Result<Stri
                 if let Some(dest) = line.split("Destination:").nth(1) {
                     let full_path = dest.trim().to_string();
                     if !full_path.is_empty() {
+                        output_paths.push(full_path.clone());
                         // Se tiver nome diferente, é um novo item
                         let new_name = std::path::Path::new(&full_path)
                             .file_name()
@@ -1386,6 +1459,7 @@ async fn start_download(app: AppHandle, options: DownloadOptions) -> Result<Stri
     }
     
     // Aguardar conclusão
+    let stderr_lines = stderr_task.join().unwrap_or_default();
     let status = child.wait().map_err(|e| format!("Erro ao aguardar processo: {}", e))?;
     
     if status.success() {
@@ -1421,7 +1495,8 @@ async fn start_download(app: AppHandle, options: DownloadOptions) -> Result<Stri
             let _ = fs::remove_file(batch_path);
         }
         
-        Err("Erro durante o download".to_string())
+        remove_partial_outputs(&output_paths);
+        Err(friendly_download_error(&stderr_lines))
     }
 }
 
