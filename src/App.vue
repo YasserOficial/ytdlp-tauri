@@ -13,7 +13,6 @@ import StepProgress from "./components/StepProgress.vue";
 
 // Setup inicial
 const setupComplete = ref(false);
-const fetchKey = ref(0);
 
 function onSetupReady() {
   setupComplete.value = true;
@@ -166,7 +165,6 @@ function startDownload() {
 }
 
 function resetWizard() {
-  fetchKey.value += 1;
   currentStep.value = 1;
   urlData.value = { url: "", radioLimit: 50 };
   authData.value = { needsAuth: false, useBrowserCookies: false, authVerified: false };
@@ -256,60 +254,55 @@ function skipAuth() {
 
     <!-- Componentes de cada passo -->
     <div class="step-content" :class="{ 'fit-screen': downloadProgress.active }">
-      <KeepAlive>
-        <Step1Url 
-          v-if="currentStep === 1 && !downloadProgress.active" 
-          v-model:url="urlData.url"
-          v-model:radioLimit="urlData.radioLimit"
-          @analyze="nextStep"
-        />
-        
-        <Step1_5Auth 
-          v-else-if="currentStep === 1.5"
-          :key="`${fetchKey}|${urlData.url}`"
-          v-model:needsAuth="authData.needsAuth"
-          v-model:useBrowserCookies="authData.useBrowserCookies"
-          v-model:authVerified="authData.authVerified"
-          :url="urlData.url"
-          @skip="skipAuth"
-          @verified="nextStep"
-        />
+      <Step1Url 
+        v-if="currentStep === 1" 
+        v-model:url="urlData.url"
+        v-model:radioLimit="urlData.radioLimit"
+        @analyze="nextStep"
+      />
+      
+      <Step1_5Auth 
+        v-if="currentStep === 1.5"
+        v-model:needsAuth="authData.needsAuth"
+        v-model:useBrowserCookies="authData.useBrowserCookies"
+        v-model:authVerified="authData.authVerified"
+        :url="urlData.url"
+        @skip="skipAuth"
+        @verified="nextStep"
+      />
 
-        <Step2Type 
-          v-else-if="currentStep === 2"
-          :key="`${fetchKey}|${urlData.url}`"
-          v-model:type="contentData.type"
-          v-model:items="contentData.items"
-          v-model:selectedItems="contentData.selectedItems"
-          :url="urlData.url"
-          :radioLimit="urlData.radioLimit"
-          :useBrowserCookies="authData.useBrowserCookies"
-        />
+      <Step2Type 
+        v-if="currentStep === 2"
+        v-model:type="contentData.type"
+        v-model:items="contentData.items"
+        v-model:selectedItems="contentData.selectedItems"
+        :url="urlData.url"
+        :radioLimit="urlData.radioLimit"
+        :useBrowserCookies="authData.useBrowserCookies"
+      />
 
-        <Step2_5Selection 
-          v-else-if="currentStep === 2.5"
-          v-model:selectedItems="contentData.selectedItems"
-          :items="contentData.items"
-          :type="contentData.type"
-        />
+      <Step2_5Selection 
+        v-if="currentStep === 2.5"
+        v-model:selectedItems="contentData.selectedItems"
+        :items="contentData.items"
+        :type="contentData.type"
+      />
 
-        <Step3Format 
-          v-else-if="currentStep === 3"
-          :key="`${fetchKey}|${contentData.selectedItems[0]?.url || urlData.url}`"
-          v-model:mode="formatData.mode"
-          v-model:quality="formatData.quality"
-          v-model:availableFormats="formatData.availableFormats"
-          :url="urlData.url"
-          :selectedItems="contentData.selectedItems"
-          :useBrowserCookies="authData.useBrowserCookies"
-        />
+      <Step3Format 
+        v-if="currentStep === 3"
+        v-model:mode="formatData.mode"
+        v-model:quality="formatData.quality"
+        v-model:availableFormats="formatData.availableFormats"
+        :url="urlData.url"
+        :selectedItems="contentData.selectedItems"
+        :useBrowserCookies="authData.useBrowserCookies"
+      />
 
-        <Step4Destination 
-          v-else-if="currentStep === 4 && !downloadProgress.active"
-          v-model:path="destinationData.path"
-          :mode="formatData.mode"
-        />
-      </KeepAlive>
+      <Step4Destination 
+        v-if="currentStep === 4 && !downloadProgress.active"
+        v-model:path="destinationData.path"
+        :mode="formatData.mode"
+      />
 
       <StepProgress 
         v-if="downloadProgress.active"
@@ -548,9 +541,7 @@ h1 {
 .step-content {
   flex: 1;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
   background: rgba(255, 255, 255, 0.03);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
@@ -563,13 +554,7 @@ h1 {
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
-.step-content > * {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-}
-
-.step-content.fit-screen > * {
+.step-content.fit-screen {
   overflow: hidden;
 }
 

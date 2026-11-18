@@ -32,6 +32,14 @@ const isRadioUrl = computed(() => {
 });
 
 onMounted(async () => {
+  if (props.type && props.items?.length) {
+    detectedType.value = props.type;
+    contentInfo.value = props.type === "video"
+      ? { type: "video", video: props.selectedItems?.[0] || props.items[0] }
+      : { type: props.type, title: "" };
+    loading.value = false;
+    return;
+  }
   await analyzeUrl();
 });
 

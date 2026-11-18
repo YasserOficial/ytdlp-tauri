@@ -109,6 +109,14 @@ const sizeLabel = computed(() => {
 });
 
 onMounted(async () => {
+  if (props.mode && props.quality && props.availableFormats?.video?.length) {
+    formats.value = {
+      video: props.availableFormats.video,
+      audio: props.availableFormats.audio || [],
+    };
+    loading.value = false;
+    return;
+  }
   await fetchFormats();
 });
 
@@ -312,11 +320,8 @@ const audioQualities = computed(() => {
 
 <style scoped>
 .step3 {
-  height: 100%;
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
 }
 
 .step3 h2 {
@@ -460,22 +465,12 @@ const audioQualities = computed(() => {
   margin: 0;
 }
 
-.format-selection {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.quality-selection {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-}
-
 .summary,
 .size-estimate {
-  flex-shrink: 0;
+  position: sticky;
+  bottom: 0;
+  background: rgba(16, 16, 28, 0.96);
+  z-index: 2;
 }
 
 .quality-options {

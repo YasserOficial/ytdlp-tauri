@@ -34,6 +34,10 @@ const isPlaylistOrRadio = computed(() => {
 });
 
 onMounted(async () => {
+  if (props.authVerified) {
+    subStep.value = "success";
+    return;
+  }
   await checkAvailability();
 });
 
