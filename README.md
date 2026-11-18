@@ -38,10 +38,11 @@ Sites reconhecidos de forma específica: YouTube, Instagram, X (Twitter) e Vimeo
 
 ## Como baixar
 
-A versão atual é a **0.1.3**, em [Releases](https://github.com/YasserOficial/ytdlp-tauri/releases/tag/v0.1.3).
+A versão atual é a **0.1.4**, em [Releases](https://github.com/YasserOficial/ytdlp-tauri/releases/tag/v0.1.4).
 
-- **Windows:** `YT-DLP GUI_0.1.3_x64-setup.exe` (instalador NSIS). O `.msi` é a alternativa. O instalador pede permissão de administrador.
-- **Linux (Ubuntu 24.04 e derivados):** `YT-DLP GUI_0.1.3_amd64.deb`. Instale com `sudo apt install ./YT-DLP\ GUI_0.1.3_amd64.deb` para o apt trazer o WebKitGTK. O pacote depende de `libwebkit2gtk-4.1-0` e `libgtk-3-0`. No Ubuntu 22.04 esses nomes não existem, então este `.deb` não serve lá.
+- **Windows:** `YT-DLP GUI_0.1.4_x64-setup.exe` (instalador NSIS). O `.msi` é a alternativa. O instalador pede permissão de administrador.
+- **Linux (Ubuntu 24.04 e derivados):** `YT-DLP GUI_0.1.4_amd64.deb`. Instale com `sudo apt install ./YT-DLP\ GUI_0.1.4_amd64.deb` para o apt trazer o WebKitGTK. O pacote depende de `libwebkit2gtk-4.1-0` e `libgtk-3-0`. No Ubuntu 22.04 esses nomes não existem, então este `.deb` não serve lá.
+- **Agente:** `ytdlp-tauri-agent-windows-x64.zip` ou `ytdlp-tauri-agent-linux-x64.tar.gz`. É o mesmo programa sem a janela: comando manual ou servidor MCP.
 
 ## Como usar
 
@@ -54,6 +55,34 @@ A versão atual é a **0.1.3**, em [Releases](https://github.com/YasserOficial/y
 7. Escolha a pasta e comece o download.
 
 As ferramentas ficam em `%LOCALAPPDATA%\ytdlp-tauri\tools` no Windows e em `~/.local/share/ytdlp-tauri/tools` no Linux (`$XDG_DATA_HOME`, se estiver definido).
+
+## Uso por agentes
+
+O executável `ytdlp-tauri-agent` usa a mesma lógica da interface e escreve JSON, uma linha por evento. A última linha tem `"event":"result"`.
+
+```bash
+ytdlp-tauri-agent tools
+ytdlp-tauri-agent analyze "https://www.youtube.com/playlist?list=..."
+ytdlp-tauri-agent formats "https://www.youtube.com/watch?v=..."
+ytdlp-tauri-agent download "https://www.youtube.com/watch?v=..." --mode video --quality 720p --out "~/Videos"
+```
+
+`--firefox` usa os cookies do Firefox desta máquina. `--item` pode repetir para baixar só alguns itens da lista. `--quiet` omite o progresso. Se o yt-dlp ou o FFmpeg não estiverem instalados, o comando baixa os dois antes de continuar.
+
+No Windows o binário sai em `src-tauri/target/release/ytdlp-tauri-agent.exe`.
+
+O mesmo binário serve para os dois usos. Na linha de comando, `download`, `analyze`, `formats` e `tools` respondem JSON. Com `mcp`, ou iniciado sem argumentos e com a entrada em pipe, vira servidor MCP. As ferramentas são `check_tools`, `analyze_url`, `list_formats` e `download`.
+
+```json
+{
+  "mcpServers": {
+    "ytdlp": {
+      "command": "D:\\ytdlp-tauri\\src-tauri\\target\\release\\ytdlp-tauri-agent.exe",
+      "args": ["mcp"]
+    }
+  }
+}
+```
 
 ## Desenvolvimento
 
