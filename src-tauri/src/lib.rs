@@ -78,6 +78,38 @@ fn configure_command(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
+fn command_exists(name: &str) -> bool {
+    let finder = if cfg!(target_os = "windows") { "where" } else { "which" };
+    let mut cmd = Command::new(finder);
+    cmd.arg(name);
+    configure_command(&mut cmd);
+    cmd.output().map(|output| output.status.success()).unwrap_or(false)
+}
+
+fn js_runtime_args() -> Vec<String> {
+    let runtime = if command_exists("node") {
+        "node"
+    } else if command_exists("deno") {
+        "deno"
+    } else {
+        "node"
+    };
+    vec!["--js-runtimes".to_string(), runtime.to_string()]
+}
+
+fn challenge_notice(text: &str) -> Option<String> {
+    let line = text.lines().find(|line| {
+        let lower = line.to_lowercase();
+        lower.contains("challenge solving failed")
+            || lower.contains("no supported javascript runtime")
+            || lower.contains("js runtime")
+    })?;
+    Some(format!(
+        "O YouTube não liberou os formatos de vídeo. O desafio JavaScript precisa do Node.js no PATH.\n{}",
+        line.trim()
+    ))
+}
+
 // Detectar a fonte da URL (YouTube, Instagram, Twitter, Vimeo, ou outros)
 #[derive(Debug, Clone, PartialEq)]
 enum VideoSource {
@@ -271,6 +303,9 @@ fn json_u64(value: Option<&serde_json::Value>) -> Option<u64> {
 fn friendly_download_error(lines: &[String]) -> String {
     let text = lines.join("\n");
     remember_block(&text);
+    if let Some(notice) = challenge_notice(&text) {
+        return notice;
+    }
     if text.contains("Sign in to confirm") || text.to_lowercase().contains("not a bot") {
         return "O YouTube pediu para confirmar que você não é um robô. Entre com o Firefox e tente de novo.".to_string();
     }
@@ -278,7 +313,10 @@ fn friendly_download_error(lines: &[String]) -> String {
         .iter()
         .filter(|line| {
             let lower = line.to_lowercase();
-            lower.contains("error") || lower.contains("ffmpeg") || lower.contains("sign in")
+            lower.contains("error")
+                || lower.contains("ffmpeg")
+                || lower.contains("sign in")
+                || lower.contains("challenge")
         })
         .map(|line| line.trim())
         .filter(|line| !line.is_empty())
@@ -726,7 +764,6 @@ async fn check_url_protection(url: String) -> Result<ProtectionResult, String> {
         // Verificar os primeiros 5 itens da playlist para detectar se algum precisa de auth
         cmd.args(&[
             "--simulate",
-            "--no-warnings",
             "--ignore-errors",
             "--socket-timeout", "10",
             "--playlist-items", "1:5",
@@ -734,6 +771,7 @@ async fn check_url_protection(url: String) -> Result<ProtectionResult, String> {
             "-j",
             &url
         ]);
+        cmd.args(js_runtime_args());
         configure_command(&mut cmd);
         let result = cmd.output();
         let _ = tx.send(result);
@@ -805,6 +843,7 @@ async fn verify_cookies(url: String, cookies_path: String) -> Result<CookiesResu
             "-j",
             &url
         ]);
+        cmd.args(js_runtime_args());
         configure_command(&mut cmd);
         let result = cmd.output();
         let _ = tx.send(result);
@@ -931,6 +970,7 @@ async fn check_firefox_youtube_cookies(url: String) -> Result<CookiesResult, Str
             "-j",
             &url
         ]);
+        cmd.args(js_runtime_args());
         configure_command(&mut cmd);
         let result = cmd.output();
         let _ = tx.send(result);
@@ -979,11 +1019,11 @@ async fn analyze_url(url: String, radio_limit: u32, cookies_path: Option<String>
     
     let mut args = vec![
         "--flat-playlist".to_string(),
-        "--no-warnings".to_string(),
         "--socket-timeout".to_string(),
         "30".to_string(),
         "-J".to_string(),
     ];
+    args.extend(js_runtime_args());
 
     // Cookies - usar do Firefox ou arquivo
     if use_browser_cookies.unwrap_or(false) {
@@ -1141,7 +1181,8 @@ fn get_formats(url: String, cookies_path: Option<String>, use_browser_cookies: O
     
     if ytdlp_path.exists() {
         let mut cmd = Command::new(&ytdlp_path);
-        cmd.args(["--list-formats", "--no-warnings", "-J"]);
+        cmd.args(["-J"]);
+        cmd.args(js_runtime_args());
         
         // Cookies - usar do Firefox ou arquivo
         if use_browser_cookies.unwrap_or(false) {
@@ -1157,6 +1198,10 @@ fn get_formats(url: String, cookies_path: Option<String>, use_browser_cookies: O
             if !output.status.success() {
                 remember_block(&String::from_utf8_lossy(&output.stderr));
             }
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if let Some(notice) = challenge_notice(&stderr) {
+                return Err(notice);
+            }
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 
@@ -1168,13 +1213,19 @@ fn get_formats(url: String, cookies_path: Option<String>, use_browser_cookies: O
                     
                     if let Some(formats) = json.get("formats").and_then(|f| f.as_array()) {
                         for format in formats {
+                            let vcodec = format.get("vcodec").and_then(|v| v.as_str()).unwrap_or("none");
+                            let ext = format.get("ext").and_then(|v| v.as_str()).unwrap_or("");
+                            let is_image = vcodec == "none"
+                                || matches!(ext, "mhtml" | "jpg" | "jpeg" | "png" | "webp");
                             // Formatos de vídeo
+                            if !is_image {
                             if let Some(height) = format.get("height").and_then(|h| h.as_i64()) {
                                 let resolution = format!("{}p", height);
                                 if !seen_resolutions.contains(&resolution) && height >= 360 {
                                     seen_resolutions.insert(resolution.clone());
                                     video_formats.push(resolution);
                                 }
+                            }
                             }
                             
                             // Formatos de áudio
@@ -1202,23 +1253,16 @@ fn get_formats(url: String, cookies_path: Option<String>, use_browser_cookies: O
                         b_num.cmp(&a_num)
                     });
                     
-                    // Se encontrou formatos, retornar
-                    if video_formats.len() > 1 || audio_formats.len() > 1 {
-                        return Ok(FormatsResult {
-                            video: video_formats,
-                            audio: audio_formats,
-                        });
-                    }
+                    return Ok(FormatsResult {
+                        video: video_formats,
+                        audio: audio_formats,
+                    });
                 }
             }
         }
     }
     
-    // Fallback: formatos padrão (sempre funcionam com yt-dlp)
-    Ok(FormatsResult {
-        video: vec!["best".to_string(), "1080p".to_string(), "720p".to_string(), "480p".to_string(), "360p".to_string()],
-        audio: vec!["best".to_string(), "320".to_string(), "256".to_string(), "192".to_string(), "128".to_string()],
-    })
+    Err("Não foi possível ler os formatos deste link.".to_string())
 }
 
 #[tauri::command]
@@ -1294,7 +1338,6 @@ async fn run_download(
     let mut args: Vec<String> = vec![
         "--ffmpeg-location".to_string(),
         ffmpeg_location,
-        "--no-warnings".to_string(),
         "--newline".to_string(),
         "--progress".to_string(),
         "--encoding".to_string(),
@@ -1308,6 +1351,7 @@ async fn run_download(
         "--retry-sleep".to_string(),
         "5".to_string(),
     ];
+    args.extend(js_runtime_args());
     
     // Configurar saída baseado no modo
     if options.mode == "audio" {

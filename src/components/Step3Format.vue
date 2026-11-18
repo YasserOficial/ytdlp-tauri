@@ -137,12 +137,8 @@ async function fetchFormats() {
     formats.value = result;
     emit("update:availableFormats", result);
   } catch (e) {
-    // Se falhar, usar formatos padrão (o yt-dlp vai lidar com a seleção)
-    console.warn("Não foi possível obter formatos reais, usando padrões:", e);
-    formats.value = {
-      video: ["best", "1080p", "720p", "480p", "360p"],
-      audio: ["best", "320", "256", "192", "128"]
-    };
+    error.value = String(e);
+    formats.value = { video: ["best"], audio: ["best"] };
     emit("update:availableFormats", formats.value);
   }
   
@@ -159,6 +155,7 @@ function selectQuality(q) {
 }
 
 const videoQualities = computed(() => {
+  const available = new Set(formats.value.video || []);
   const qualities = [
     { id: "best", label: "Melhor qualidade", desc: "Maior resolução disponível" },
     { id: "1080p", label: "1080p (Full HD)", desc: "até 1080p de altura" },
@@ -166,19 +163,16 @@ const videoQualities = computed(() => {
     { id: "480p", label: "480p (SD)", desc: "até 480p de altura" },
     { id: "360p", label: "360p", desc: "até 360p de altura" },
   ];
-  return qualities;
+  return qualities.filter((q) => available.has(q.id));
 });
 
-const audioQualities = computed(() => {
-  const qualities = [
-    { id: "best", label: "Melhor qualidade", desc: "Maior bitrate disponível" },
-    { id: "320", label: "320 kbps", desc: "Alta qualidade" },
-    { id: "256", label: "256 kbps", desc: "Boa qualidade" },
-    { id: "192", label: "192 kbps", desc: "Qualidade média" },
-    { id: "128", label: "128 kbps", desc: "Qualidade padrão" },
-  ];
-  return qualities;
-});
+const audioQualities = computed(() => [
+  { id: "best", label: "Melhor qualidade", desc: "Maior bitrate disponível" },
+  { id: "320", label: "320 kbps", desc: "Alta qualidade" },
+  { id: "256", label: "256 kbps", desc: "Boa qualidade" },
+  { id: "192", label: "192 kbps", desc: "Qualidade média" },
+  { id: "128", label: "128 kbps", desc: "Qualidade padrão" },
+]);
 </script>
 
 <template>
