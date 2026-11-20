@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
 const props = defineProps({
@@ -7,7 +7,8 @@ const props = defineProps({
   destination: String,
 });
 
-const emit = defineEmits(["done", "cancel", "back"]);
+// O botão de cancelar fica na barra de baixo do App, sempre visível
+const emit = defineEmits(["done", "back"]);
 
 const progressPercent = computed(() => {
   return Math.round(props.progress.percent || 0);
@@ -46,12 +47,6 @@ const endedIcon = computed(() => {
   }
 });
 
-const cancelling = ref(false);
-
-function requestCancel() {
-  cancelling.value = true;
-  emit("cancel");
-}
 
 const statusText = computed(() => {
   switch (props.progress.status) {
@@ -140,10 +135,6 @@ async function openDownloadsFolder() {
           <span class="value eta">{{ progress.eta }}</span>
         </div>
       </div>
-
-      <button @click="requestCancel" class="btn-cancel" :disabled="cancelling">
-        {{ cancelling ? "Cancelando..." : "⏹ Cancelar" }}
-      </button>
     </div>
 
     <div v-else-if="isEnded" class="completed ended">
@@ -223,12 +214,11 @@ async function openDownloadsFolder() {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  /* "safe": se não couber, começa do topo em vez de cortar em cima e embaixo */
+  justify-content: safe center;
   text-align: center;
   padding: 8px 12px;
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
+  min-height: 100%;
   box-sizing: border-box;
 }
 

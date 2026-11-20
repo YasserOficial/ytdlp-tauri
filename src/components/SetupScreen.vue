@@ -9,6 +9,8 @@ const currentTool = ref("");
 const progress = ref(0);
 const error = ref("");
 const logs = ref([]);
+// Os logs começam abertos; clicar no título recolhe e mostra de novo
+const showLogs = ref(true);
 
 const tools = ref({
   ytdlp: { installed: false, version: "", downloading: false, latestVersion: "", updateAvailable: false },
@@ -309,7 +311,7 @@ function skipUpdate() {
         <div class="logs-header" @click="showLogs = !showLogs">
           📋 Logs
         </div>
-        <div class="logs-content">
+        <div class="logs-content" v-if="showLogs">
           <div v-for="(log, index) in logs" :key="index" class="log-entry">
             <span class="log-time">{{ log.time }}</span>
             <span class="log-message">{{ log.message }}</span>
@@ -770,7 +772,7 @@ h1 {
 }
 
 .btn-update {
-  background: linear-gradient(135deg, #00b894, #00cec9);
+  background: linear-gradient(135deg, #e94560, #ff6b6b);
   color: white;
   border: none;
   padding: 14px 35px;
@@ -779,12 +781,12 @@ h1 {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s;
-  box-shadow: 0 8px 25px rgba(0, 184, 148, 0.35);
+  box-shadow: 0 8px 25px rgba(233, 69, 96, 0.35);
 }
 
 .btn-update:hover {
   transform: translateY(-2px);
-  box-shadow: 0 12px 35px rgba(0, 184, 148, 0.45);
+  box-shadow: 0 12px 35px rgba(233, 69, 96, 0.45);
 }
 
 .btn-skip {

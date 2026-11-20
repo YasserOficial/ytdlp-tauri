@@ -6,12 +6,26 @@ const props = defineProps({
   url: String,
   radioLimit: Number,
   useBrowserCookies: Boolean,
+  cookiesPath: String,
   type: String,
   items: Array,
   selectedItems: Array,
+  // Guardados no App para o passo voltar igual depois do "Voltar"
+  detected: String,
+  title: String,
+  video: Object,
+  choice: String,
 });
 
-const emit = defineEmits(["update:type", "update:items", "update:selectedItems"]);
+const emit = defineEmits([
+  "update:type",
+  "update:items",
+  "update:selectedItems",
+  "update:detected",
+  "update:title",
+  "update:video",
+  "update:choice",
+]);
 
 const loading = ref(true);
 const error = ref("");
@@ -32,11 +46,11 @@ const isRadioUrl = computed(() => {
 });
 
 onMounted(async () => {
-  if (props.type && props.items?.length) {
-    detectedType.value = props.type;
-    contentInfo.value = props.type === "video"
-      ? { type: "video", video: props.selectedItems?.[0] || props.items[0] }
-      : { type: props.type, title: "" };
+  // Já analisado: mostra o mesmo resultado e a mesma escolha, sem consultar de novo
+  if (props.detected && props.items?.length) {
+    detectedType.value = props.detected;
+    contentInfo.value = { type: props.detected, title: props.title, video: props.video };
+    userChoice.value = props.choice || "";
     loading.value = false;
     return;
   }
@@ -60,13 +74,18 @@ async function analyzeUrl() {
     const result = await invoke("analyze_url", { 
       url: props.url,
       radioLimit: props.radioLimit,
-      cookiesPath: null,
+      cookiesPath: props.cookiesPath || null,
       useBrowserCookies: props.useBrowserCookies || false
     });
     
     contentInfo.value = result;
     detectedType.value = result.type;
-    
+    userChoice.value = "";
+    emit("update:detected", result.type);
+    emit("update:title", result.title || "");
+    emit("update:video", result.video || null);
+    emit("update:choice", "");
+
     if (result.type === "video") {
       emit("update:type", "video");
       emit("update:items", [result.video]);
@@ -90,17 +109,23 @@ async function analyzeUrl() {
 }
 
 function selectOption(option) {
+  const previous = userChoice.value;
   userChoice.value = option;
-  
+  emit("update:choice", option);
+
   if (option === "single") {
     emit("update:type", "video");
-    emit("update:selectedItems", [contentInfo.value.video]);
+    emit("update:selectedItems", contentInfo.value?.video ? [contentInfo.value.video] : []);
   } else if (option === "playlist") {
+    // "Baixar tudo" já leva todos os itens e pula a seleção
     emit("update:type", detectedType.value === "video_with_radio" ? "radio" : "playlist");
-    emit("update:selectedItems", []); 
+    emit("update:selectedItems", [...props.items]);
   } else if (option === "select") {
     emit("update:type", detectedType.value === "video_with_radio" ? "radio" : "playlist");
-    emit("update:selectedItems", []); 
+    // Só limpa se vier de outra escolha; ao voltar, a seleção feita continua
+    if (previous !== "select") {
+      emit("update:selectedItems", []);
+    }
   }
 }
 

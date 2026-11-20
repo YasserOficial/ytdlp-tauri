@@ -2,15 +2,24 @@
 import { ref, onMounted, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
 const props = defineProps({
   url: String,
   needsAuth: Boolean,
   useBrowserCookies: Boolean,
   authVerified: Boolean,
+  cookiesPath: String,
 });
 
-const emit = defineEmits(["update:needsAuth", "update:useBrowserCookies", "update:authVerified", "skip", "verified"]);
+const emit = defineEmits([
+  "update:needsAuth",
+  "update:useBrowserCookies",
+  "update:authVerified",
+  "update:cookiesPath",
+  "back",
+  "verified",
+]);
 
 // Sub-passos do wizard de autenticação
 // checking: Verificando disponibilidade (tenta com cookies do Firefox automaticamente)
@@ -19,11 +28,54 @@ const emit = defineEmits(["update:needsAuth", "update:useBrowserCookies", "updat
 // checking_firefox (1.7.1): Verificando instalação do Firefox
 // login_firefox (1.8): Botão para abrir Firefox e logar
 // verifying_cookies (1.9): Verificando cookies automaticamente
+// verifying_file: Conferindo um arquivo de cookies escolhido pela pessoa (opção avançada)
 // success: Sucesso!
 const subStep = ref("checking");
 
 const statusMessage = ref("Verificando disponibilidade...");
 const error = ref("");
+const fileError = ref("");
+
+// Opção avançada: usar um cookies.txt exportado (formato Netscape) em vez do Firefox
+async function pickCookiesFile() {
+  fileError.value = "";
+  let selected;
+  try {
+    selected = await openDialog({
+      multiple: false,
+      directory: false,
+      title: "Escolha o arquivo de cookies",
+      filters: [
+        { name: "Cookies (Netscape .txt)", extensions: ["txt"] },
+        { name: "Todos os arquivos", extensions: ["*"] },
+      ],
+    });
+  } catch (e) {
+    fileError.value = "Não foi possível abrir a janela de arquivos: " + e;
+    return;
+  }
+  if (!selected) return;
+
+  subStep.value = "verifying_file";
+  try {
+    const result = await invoke("verify_cookies", { url: props.url, cookiesPath: selected });
+    if (result.valid) {
+      emit("update:useBrowserCookies", false);
+      emit("update:cookiesPath", selected);
+      emit("update:needsAuth", true);
+      emit("update:authVerified", true);
+      subStep.value = "success";
+      emit("verified");
+    } else {
+      fileError.value =
+        "Esse arquivo não liberou o acesso. Exporte os cookies de novo, com a conta logada no YouTube, no formato Netscape.";
+      subStep.value = "needs_auth";
+    }
+  } catch (e) {
+    fileError.value = "Erro ao conferir o arquivo: " + e;
+    subStep.value = "needs_auth";
+  }
+}
 const firefoxInstalled = ref(false);
 
 // Detectar tipo de URL
@@ -108,9 +160,15 @@ function startAuthFlow() {
   subStep.value = "firefox_tutorial";
 }
 
-// 1.6: Usuário mudou de ideia
+// 1.6: Usuário mudou de ideia: volta para o link
 function cancelAuth() {
-  emit("skip");
+  emit("back");
+}
+
+// Dentro do tutorial, "Voltar" volta uma tela do próprio tutorial
+function backInAuthFlow() {
+  error.value = "";
+  subStep.value = subStep.value === "login_firefox" ? "firefox_tutorial" : "needs_auth";
 }
 
 // 1.7: Abrir link para download do Firefox
@@ -194,6 +252,7 @@ async function verifyCookiesAfterLogin() {
         <div>
           <strong>Acesso liberado!</strong>
           <p v-if="useBrowserCookies">Autenticado automaticamente via Firefox.</p>
+          <p v-else-if="cookiesPath">Autenticado com o arquivo de cookies.</p>
           <p v-else>O conteúdo está disponível publicamente.</p>
           <p v-if="isPlaylistOrRadio" class="playlist-note">
             📋 Playlist/Rádio detectada - a análise completa será feita no próximo passo.
@@ -223,6 +282,24 @@ async function verifyCookiesAfterLogin() {
         <p class="auth-note">
           💡 Usaremos o Firefox para autenticar automaticamente - sem precisar exportar cookies!
         </p>
+
+        <div class="expert-option">
+          <span class="expert-label">Avançado</span>
+          <button @click="pickCookiesFile" class="btn-link expert-link">
+            📄 Usar um arquivo de cookies (cookies.txt)
+          </button>
+          <p v-if="fileError" class="file-error">⚠️ {{ fileError }}</p>
+        </div>
+      </div>
+    </template>
+
+    <!-- Conferindo o arquivo de cookies -->
+    <template v-else-if="subStep === 'verifying_file'">
+      <h2>📄 Conferindo o Arquivo de Cookies</h2>
+      <div class="checking">
+        <div class="spinner"></div>
+        <p>Testando se o arquivo libera o acesso...</p>
+        <span class="checking-hint">Isso pode levar alguns segundos</span>
       </div>
     </template>
 
@@ -257,7 +334,7 @@ async function verifyCookiesAfterLogin() {
           </button>
         </div>
         
-        <button @click="cancelAuth" class="btn-link">
+        <button @click="backInAuthFlow" class="btn-link">
           ← Voltar
         </button>
       </div>
@@ -314,7 +391,7 @@ async function verifyCookiesAfterLogin() {
           </button>
         </div>
         
-        <button @click="cancelAuth" class="btn-link">
+        <button @click="backInAuthFlow" class="btn-link">
           ← Voltar
         </button>
       </div>
@@ -360,7 +437,7 @@ async function verifyCookiesAfterLogin() {
 .spinner {
   width: 50px;
   height: 50px;
-  border: 4px solid #0f3460;
+  border: 4px solid rgba(255, 255, 255, 0.1);
   border-top-color: #e94560;
   border-radius: 50%;
   animation: spin 1s linear infinite;
@@ -395,7 +472,8 @@ async function verifyCookiesAfterLogin() {
 
 /* Card de autenticação */
 .auth-card {
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 16px;
   padding: 40px;
   text-align: center;
@@ -427,25 +505,53 @@ async function verifyCookiesAfterLogin() {
 }
 
 .auth-note {
-  color: #666;
+  color: rgba(255, 255, 255, 0.45);
   font-size: 13px;
   margin: 0;
 }
 
+/* Opção para quem já tem um cookies.txt exportado */
+.expert-option {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.expert-label {
+  display: block;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.expert-link {
+  margin-top: 4px;
+}
+
+.file-error {
+  color: #ff8a80;
+  font-size: 13px;
+  margin: 8px 0 0;
+}
+
 /* Tutorial Card */
 .tutorial-card {
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 16px;
   padding: 35px;
 }
 
 .step-indicator {
-  background: #0f3460;
-  color: #e94560;
+  background: rgba(233, 69, 96, 0.15);
+  border: 1px solid rgba(233, 69, 96, 0.3);
+  color: #ff8a80;
   padding: 6px 14px;
   border-radius: 20px;
   font-size: 12px;
   display: inline-block;
+  vertical-align: middle;
   margin-bottom: 20px;
 }
 
@@ -511,8 +617,12 @@ async function verifyCookiesAfterLogin() {
 .firefox-found {
   background: #1a4a3a;
   color: #00b894;
-  padding: 12px 20px;
-  border-radius: 8px;
+  padding: 6px 14px;
+  margin-left: 8px;
+  font-size: 12px;
+  vertical-align: middle;
+  border: 1px solid rgba(0, 184, 148, 0.3);
+  border-radius: 20px;
   margin-bottom: 20px;
   display: inline-block;
 }
@@ -578,8 +688,9 @@ async function verifyCookiesAfterLogin() {
 }
 
 .btn-secondary {
-  background: #0f3460;
-  color: #888;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: rgba(255, 255, 255, 0.8);
   border: none;
   padding: 14px 28px;
   border-radius: 10px;
@@ -590,7 +701,7 @@ async function verifyCookiesAfterLogin() {
 }
 
 .btn-secondary:hover {
-  background: #1a4a7a;
+  background: rgba(255, 255, 255, 0.1);
   color: #fff;
 }
 
@@ -615,7 +726,7 @@ async function verifyCookiesAfterLogin() {
 .btn-link {
   background: none;
   border: none;
-  color: #666;
+  color: rgba(255, 255, 255, 0.5);
   cursor: pointer;
   font-size: 14px;
   padding: 10px;

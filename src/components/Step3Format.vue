@@ -6,6 +6,7 @@ const props = defineProps({
   url: String,
   selectedItems: Array,
   useBrowserCookies: Boolean,
+  cookiesPath: String,
   mode: String,
   quality: String,
   availableFormats: Array,
@@ -130,7 +131,7 @@ async function fetchFormats() {
     
     const result = await invoke("get_formats", { 
       url: sampleUrl,
-      cookiesPath: null,
+      cookiesPath: props.cookiesPath || null,
       useBrowserCookies: props.useBrowserCookies || false
     });
     
@@ -287,8 +288,9 @@ const audioQualities = computed(() => [
         </div>
       </div>
 
-      <!-- Estimativa de tamanho -->
-      <div v-if="mode && quality && itemCount > 0" class="size-estimate">
+      <!-- Estimativa de tamanho: rodapé fixo do painel, visível ao rolar -->
+      <div v-if="mode && quality && itemCount > 0" class="sticky-footer">
+      <div class="size-estimate">
         <div class="size-indicator" :style="{ borderColor: sizeColor }">
           <div class="size-icon" :style="{ backgroundColor: sizeColor }">
             <span v-if="estimatedSize <= 300">📦</span>
@@ -315,6 +317,7 @@ const audioQualities = computed(() => [
           <span v-if="isApproximate">* Estimativa aproximada (4min por item). O tamanho real pode variar bastante.</span>
           <span v-else>* Estimativa baseada na duração total. O tamanho real pode variar.</span>
         </p>
+      </div>
       </div>
     </div>
   </div>
@@ -467,12 +470,26 @@ const audioQualities = computed(() => [
   margin: 0;
 }
 
-.summary,
-.size-estimate {
+/*
+ * Ocupa a largura toda do painel (desfaz o padding de 30px dele) e fecha
+ * com os mesmos cantos de 24px, em vez de um retângulo escuro solto.
+ */
+.sticky-footer {
   position: sticky;
-  bottom: 0;
-  background: rgba(16, 16, 28, 0.96);
+  bottom: -30px;
   z-index: 2;
+  margin: 20px -30px -30px;
+  padding: 24px 30px 16px;
+  border-radius: 0 0 24px 24px;
+  background: linear-gradient(to bottom, rgba(22, 19, 34, 0), rgba(22, 19, 34, 0.97) 24px);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 18px);
+  mask-image: linear-gradient(to bottom, transparent, #000 18px);
+}
+
+.sticky-footer .size-estimate {
+  margin-top: 0;
 }
 
 .quality-options {

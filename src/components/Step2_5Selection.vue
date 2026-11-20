@@ -169,9 +169,9 @@ function formatDuration(seconds) {
 }
 
 .btn-action {
-  background: #0f3460;
-  color: #aaa;
-  border: none;
+  background: rgba(233, 69, 96, 0.15);
+  color: #ff8a80;
+  border: 1px solid rgba(233, 69, 96, 0.3);
   padding: 8px 14px;
   border-radius: 6px;
   cursor: pointer;
@@ -180,7 +180,7 @@ function formatDuration(seconds) {
 }
 
 .btn-action:hover {
-  background: #1a4a7a;
+  background: rgba(233, 69, 96, 0.3);
   color: white;
 }
 
@@ -220,8 +220,8 @@ function formatDuration(seconds) {
 }
 
 .item-card:hover {
-  background: #1a2a3e;
-  border-color: #0f3460;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(233, 69, 96, 0.3);
 }
 
 .item-card.selected {
@@ -304,11 +304,11 @@ function formatDuration(seconds) {
 }
 
 .items-list::-webkit-scrollbar-thumb {
-  background: #0f3460;
+  background: rgba(233, 69, 96, 0.35);
   border-radius: 4px;
 }
 
 .items-list::-webkit-scrollbar-thumb:hover {
-  background: #1a4a7a;
+  background: rgba(233, 69, 96, 0.55);
 }
 </style>

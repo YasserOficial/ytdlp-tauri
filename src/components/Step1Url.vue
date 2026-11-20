@@ -101,10 +101,10 @@ onUnmounted(() => {
 <template>
   <div class="step1">
     <h2>📎 Passo 1: Cole o Link</h2>
-    <p class="description">Cole a URL do YouTube (vídeo, playlist ou rádio/mix)</p>
+    <p class="description">Cole o link de um vídeo, playlist ou rádio/mix (YouTube ou outro site que o yt-dlp aceite)</p>
     
     <div class="form-group">
-      <label for="url">URL do YouTube</label>
+      <label for="url">Link</label>
       <div class="input-with-button">
         <input 
           id="url"

@@ -4,6 +4,8 @@ version = "0.1.6"
 description = "Interface gráfica para baixar vídeo e áudio com yt-dlp"
 authors = ["Yasser"]
 edition = "2021"
+# Há dois binários (interface e agente); `tauri dev` / `cargo run` abrem a interface
+default-run = "ytdlp-tauri"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

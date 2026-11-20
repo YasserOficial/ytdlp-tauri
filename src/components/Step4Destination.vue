@@ -106,7 +106,7 @@ function formatPath(path) {
         <li>Os arquivos serão salvos com o nome original do vídeo</li>
         <li v-if="mode === 'audio'">Formato de saída: <strong>MP3</strong></li>
         <li v-else>Formato de saída: <strong>MP4</strong></li>
-        <li>Arquivos duplicados serão renomeados automaticamente</li>
+        <li>Se o arquivo já existir na pasta, ele é pulado</li>
       </ul>
     </div>
 

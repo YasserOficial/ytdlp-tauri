@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import SetupScreen from "./components/SetupScreen.vue";
@@ -28,12 +28,21 @@ const authData = ref({
   needsAuth: false,
   useBrowserCookies: false,
   authVerified: false,
+  cookiesPath: "", // arquivo cookies.txt escolhido na opção avançada
 });
 const contentData = ref({
   type: "", // "video", "playlist", "radio"
   items: [],
   selectedItems: [],
+  detected: "", // tipo que a análise devolveu, inclusive video_with_playlist/radio
+  title: "",
+  video: null,
+  choice: "", // "single", "playlist" (baixar tudo) ou "select"
 });
+
+function emptyContent() {
+  return { type: "", items: [], selectedItems: [], detected: "", title: "", video: null, choice: "" };
+}
 const formatData = ref({
   mode: "", // "audio", "video"
   quality: "",
@@ -97,18 +106,36 @@ const canGoNext = computed(() => {
   }
 });
 
+// O passo 2 só pede decisão quando o link é um vídeo dentro de playlist ou rádio
+const typeStepHasChoice = computed(() =>
+  ["video_with_playlist", "video_with_radio"].includes(contentData.value.detected)
+);
+
+// A seleção de itens aparece para listas, menos quando a escolha foi "Baixar tudo"
+const usesSelectionStep = computed(() =>
+  contentData.value.type !== "video" &&
+  contentData.value.items.length > 1 &&
+  contentData.value.choice !== "playlist"
+);
+
+// Trocar o link (ou o limite da rádio) invalida o que veio depois dele
+watch(
+  () => [urlData.value.url, urlData.value.radioLimit],
+  () => {
+    authData.value = { needsAuth: false, useBrowserCookies: false, authVerified: false, cookiesPath: "" };
+    contentData.value = emptyContent();
+    formatData.value = { mode: "", quality: "", availableFormats: [] };
+  }
+);
+
 function nextStep() {
   if (currentStep.value === 1) {
-    currentStep.value = 1.5;
+    // Acesso já verificado para este link: não para de novo na tela de verificação
+    currentStep.value = authData.value.authVerified ? 2 : 1.5;
   } else if (currentStep.value === 1.5) {
     currentStep.value = 2;
   } else if (currentStep.value === 2) {
-    // Se precisa selecionar itens
-    if (contentData.value.type !== "video" && contentData.value.items.length > 1) {
-      currentStep.value = 2.5;
-    } else {
-      currentStep.value = 3;
-    }
+    currentStep.value = usesSelectionStep.value ? 2.5 : 3;
   } else if (currentStep.value === 2.5) {
     currentStep.value = 3;
   } else if (currentStep.value === 3) {
@@ -116,23 +143,59 @@ function nextStep() {
   }
 }
 
+// Volta para o último passo em que houve uma decisão.
+// A verificação de acesso e o resumo do tipo de conteúdo são pulados.
 function prevStep() {
-  if (currentStep.value === 1.5) {
+  if (currentStep.value === 1.5 || currentStep.value === 2) {
     currentStep.value = 1;
-  } else if (currentStep.value === 2) {
-    currentStep.value = 1.5;
   } else if (currentStep.value === 2.5) {
-    currentStep.value = 2;
+    currentStep.value = typeStepHasChoice.value ? 2 : 1;
   } else if (currentStep.value === 3) {
-    if (contentData.value.type !== "video" && contentData.value.items.length > 1) {
+    if (usesSelectionStep.value) {
       currentStep.value = 2.5;
     } else {
-      currentStep.value = 2;
+      currentStep.value = typeStepHasChoice.value ? 2 : 1;
     }
   } else if (currentStep.value === 4) {
     currentStep.value = 3;
   }
 }
+
+const prevLabel = computed(() => {
+  const step = currentStep.value;
+  if (step === 4) return "← Formato";
+  if (step === 3 && usesSelectionStep.value) return "← Itens";
+  if ((step === 3 || step === 2.5) && typeStepHasChoice.value) return "← Escolha";
+  return "← Link";
+});
+
+function cancelWizard() {
+  resetWizard();
+}
+
+// Download em andamento: o Cancelar fica na barra de baixo, sempre visível
+const isDownloading = computed(
+  () =>
+    downloadProgress.value.active &&
+    !["completed", "partial", "cancelled", "error"].includes(downloadProgress.value.status)
+);
+
+const cancelling = ref(false);
+
+function requestCancelDownload() {
+  cancelling.value = true;
+  cancelDownload();
+}
+
+watch(isDownloading, (running) => {
+  if (!running) cancelling.value = false;
+});
+
+// Cada passo começa do topo, sem herdar a rolagem do passo anterior
+const contentEl = ref(null);
+watch([currentStep, () => downloadProgress.value.active], () => {
+  if (contentEl.value) contentEl.value.scrollTop = 0;
+});
 
 function startDownload() {
   downloadProgress.value.active = true;
@@ -156,7 +219,7 @@ function startDownload() {
       destination: destinationData.value.path,
       mode: formatData.value.mode,
       quality: formatData.value.quality,
-      cookies_path: null,
+      cookies_path: authData.value.cookiesPath || null,
       use_browser_cookies: authData.value.useBrowserCookies,
       selected_items: selected.length > 0 ? selected : null,
     }
@@ -190,8 +253,8 @@ function backToDestination() {
 function resetWizard() {
   currentStep.value = 1;
   urlData.value = { url: "", radioLimit: 50 };
-  authData.value = { needsAuth: false, useBrowserCookies: false, authVerified: false };
-  contentData.value = { type: "", items: [], selectedItems: [] };
+  authData.value = { needsAuth: false, useBrowserCookies: false, authVerified: false, cookiesPath: "" };
+  contentData.value = emptyContent();
   formatData.value = { mode: "", quality: "", availableFormats: [] };
   destinationData.value = { path: "" };
   downloadProgress.value = { active: false, current: 0, total: 0, currentFile: "", percent: 0, message: "", files: [] };
@@ -225,12 +288,6 @@ function getIconStyle(index) {
   };
 }
 
-// Pular autenticação se não precisar
-function skipAuth() {
-  authData.value.needsAuth = false;
-  authData.value.authVerified = true;
-  nextStep();
-}
 </script>
 
 <template>
@@ -276,7 +333,7 @@ function skipAuth() {
     </div>
 
     <!-- Componentes de cada passo -->
-    <div class="step-content" :class="{ 'fit-screen': downloadProgress.active }">
+    <div ref="contentEl" class="step-content" :class="{ 'fit-screen': downloadProgress.active }">
       <Step1Url 
         v-if="currentStep === 1" 
         v-model:url="urlData.url"
@@ -289,8 +346,9 @@ function skipAuth() {
         v-model:needsAuth="authData.needsAuth"
         v-model:useBrowserCookies="authData.useBrowserCookies"
         v-model:authVerified="authData.authVerified"
+        v-model:cookiesPath="authData.cookiesPath"
         :url="urlData.url"
-        @skip="skipAuth"
+        @back="prevStep"
         @verified="nextStep"
       />
 
@@ -299,9 +357,14 @@ function skipAuth() {
         v-model:type="contentData.type"
         v-model:items="contentData.items"
         v-model:selectedItems="contentData.selectedItems"
+        v-model:detected="contentData.detected"
+        v-model:title="contentData.title"
+        v-model:video="contentData.video"
+        v-model:choice="contentData.choice"
         :url="urlData.url"
         :radioLimit="urlData.radioLimit"
         :useBrowserCookies="authData.useBrowserCookies"
+        :cookiesPath="authData.cookiesPath"
       />
 
       <Step2_5Selection 
@@ -319,6 +382,7 @@ function skipAuth() {
         :url="urlData.url"
         :selectedItems="contentData.selectedItems"
         :useBrowserCookies="authData.useBrowserCookies"
+        :cookiesPath="authData.cookiesPath"
       />
 
       <Step4Destination 
@@ -332,20 +396,20 @@ function skipAuth() {
         :progress="downloadProgress"
         :destination="destinationData.path"
         @done="resetWizard"
-        @cancel="cancelDownload"
         @back="backToDestination"
       />
     </div>
 
     <!-- Navegação -->
     <div class="navigation" v-if="!downloadProgress.active">
-      <button 
-        v-if="currentStep > 1" 
-        @click="prevStep" 
-        class="btn-secondary"
-      >
-        ← Voltar
-      </button>
+      <div class="nav-left" v-if="currentStep > 1">
+        <button @click="prevStep" class="btn-secondary">
+          {{ prevLabel }}
+        </button>
+        <button @click="cancelWizard" class="btn-cancel" title="Descarta as escolhas e volta ao começo">
+          ✕ Cancelar
+        </button>
+      </div>
       <div v-else></div>
       
       <button 
@@ -364,6 +428,13 @@ function skipAuth() {
         class="btn-download"
       >
         🚀 Iniciar Download
+      </button>
+    </div>
+
+    <div class="navigation" v-else-if="isDownloading">
+      <div></div>
+      <button @click="requestCancelDownload" class="btn-secondary" :disabled="cancelling">
+        {{ cancelling ? "Cancelando..." : "⏹ Cancelar download" }}
       </button>
     </div>
   </main>
@@ -580,7 +651,7 @@ h1 {
 }
 
 .step-content.fit-screen {
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 /* Navegação */
@@ -619,6 +690,23 @@ button:disabled {
 .btn-primary:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 8px 30px rgba(233, 69, 96, 0.5);
+}
+
+.nav-left {
+  display: flex;
+  gap: 10px;
+}
+
+.btn-cancel {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  border: 1px solid transparent;
+  padding: 14px 18px;
+}
+
+.btn-cancel:hover {
+  color: rgba(255, 255, 255, 0.9);
+  border-color: rgba(255, 255, 255, 0.15);
 }
 
 .btn-secondary {
