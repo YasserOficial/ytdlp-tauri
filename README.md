@@ -37,10 +37,10 @@ Um assistente em passos: cole o link, escolha o que baixar, o formato e a pasta.
 
 ## Como baixar
 
-A versão atual é a **0.1.5**, em [Releases](https://github.com/YasserOficial/ytdlp-tauri/releases/tag/v0.1.5).
+A versão atual é a **0.1.6**, em [Releases](https://github.com/YasserOficial/ytdlp-tauri/releases/tag/v0.1.6).
 
-- **Windows:** `YT-DLP GUI_0.1.5_x64-setup.exe` (instalador NSIS). O `.msi` é a alternativa. O instalador pede permissão de administrador.
-- **Linux (Ubuntu 24.04 e derivados):** `YT-DLP GUI_0.1.5_amd64.deb`. Instale com `sudo apt install ./YT-DLP\ GUI_0.1.5_amd64.deb` para o apt trazer o WebKitGTK. O pacote depende de `libwebkit2gtk-4.1-0` e `libgtk-3-0`. No Ubuntu 22.04 esses nomes não existem, então este `.deb` não serve lá.
+- **Windows:** `YT-DLP GUI_0.1.6_x64-setup.exe` (instalador NSIS). O `.msi` é a alternativa. O instalador pede permissão de administrador.
+- **Linux (Ubuntu 24.04 e derivados):** `YT-DLP GUI_0.1.6_amd64.deb`. Instale com `sudo apt install ./YT-DLP\ GUI_0.1.6_amd64.deb` para o apt trazer o WebKitGTK. O pacote depende de `libwebkit2gtk-4.1-0` e `libgtk-3-0`. No Ubuntu 22.04 esses nomes não existem, então este `.deb` não serve lá.
 - **Agente:** `ytdlp-tauri-agent-windows-x64.zip` ou `ytdlp-tauri-agent-linux-x64.tar.gz`. É o mesmo programa sem a janela: comando manual ou servidor MCP.
 
 ## Como usar
@@ -67,6 +67,8 @@ ytdlp-tauri-agent analyze "https://www.youtube.com/playlist?list=..."
 ytdlp-tauri-agent formats "https://www.youtube.com/watch?v=..."
 ytdlp-tauri-agent download "https://www.youtube.com/watch?v=..." --mode video --quality 720p --out "~/Videos"
 ```
+
+Se parte de uma lista falhar, o resultado traz os arquivos salvos e o campo `warning`, e o comando sai com código 2.
 
 `--firefox` usa os cookies do Firefox da máquina onde o comando roda. `--cookies` aponta um arquivo Netscape. `--item` pode repetir para baixar só alguns itens da lista. `--quiet` omite o progresso. `--radio-limit` corta a rádio. O padrão é 50. Se o yt-dlp ou o FFmpeg não estiverem instalados, o comando baixa os dois antes de continuar.
 
