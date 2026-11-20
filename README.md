@@ -57,7 +57,14 @@ As ferramentas ficam em `%LOCALAPPDATA%\ytdlp-tauri\tools` no Windows e em `~/.l
 
 ## Uso por agentes
 
-O arquivo da release traz o `ytdlp-tauri-agent`, sem instalador e sem janela. No Windows ele está dentro do `.zip`. No Linux, dentro do `.tar.gz`. Os dois usos cabem nesse mesmo arquivo.
+O `ytdlp-tauri-agent` é o mesmo programa sem janela. Ele não precisa da interface aberta: o cliente MCP ou o script o abre quando precisa. A pasta das ferramentas é a mesma da interface, então o yt-dlp e o FFmpeg instalados por um servem para o outro.
+
+Quem instalou o app já tem o agente:
+
+- **Windows:** `C:\Program Files\YT-DLP GUI\ytdlp-tauri-agent.exe`, ao lado do app. Ele não entra no PATH, então use o caminho completo.
+- **Linux (`.deb`):** `/usr/bin/ytdlp-tauri-agent`, já no PATH.
+
+Sem instalar a interface, baixe o `ytdlp-tauri-agent-windows-x64.zip` ou o `ytdlp-tauri-agent-linux-x64.tar.gz` da release. Os dois usos, manual e MCP, cabem nesse mesmo arquivo.
 
 Uso manual: um comando, resposta em JSON. A última linha tem `"event":"result"`.
 
@@ -91,7 +98,17 @@ Servidor MCP: `ytdlp-tauri-agent mcp`. Sem argumentos, se a entrada já vier por
 }
 ```
 
-No Linux, `command` é o caminho do binário `ytdlp-tauri-agent` depois de extrair o `.tar.gz`. A pasta das ferramentas é a mesma da interface.
+Com o app instalado no Windows, `command` é `"C:\\Program Files\\YT-DLP GUI\\ytdlp-tauri-agent.exe"` (no JSON a barra vai dobrada). No Linux, `ytdlp-tauri-agent` (instalado pelo `.deb`) ou o caminho do binário extraído do `.tar.gz`.
+
+No Claude Code, um comando só registra o servidor:
+
+```powershell
+claude mcp add ytdlp -- "C:\Program Files\YT-DLP GUI\ytdlp-tauri-agent.exe" mcp
+```
+
+```bash
+claude mcp add ytdlp -- ytdlp-tauri-agent mcp
+```
 
 ## Desenvolvimento
 
