@@ -70,9 +70,15 @@ ytdlp-tauri-agent download "https://www.youtube.com/watch?v=..." --mode video --
 
 Se parte de uma lista falhar, o resultado traz os arquivos salvos e o campo `warning`, e o comando sai com código 2.
 
-`--firefox` usa os cookies do Firefox da máquina onde o comando roda. `--cookies` aponta um arquivo Netscape. `--item` pode repetir para baixar só alguns itens da lista. `--quiet` omite o progresso. `--radio-limit` corta a rádio. O padrão é 50. Se o yt-dlp ou o FFmpeg não estiverem instalados, o comando baixa os dois antes de continuar.
+`--firefox` usa os cookies do Firefox da máquina onde o comando roda. `--cookies` aponta um arquivo Netscape. `--item` pode repetir para baixar só alguns itens da lista. `--quiet` omite o progresso. `--radio-limit` corta a rádio. O padrão é 50. `--out` e `--cookies` aceitam `~` para a pasta pessoal.
 
-Servidor MCP: `ytdlp-tauri-agent mcp`. Sem argumentos, se a entrada já vier por pipe, ele também sobe como MCP. As ferramentas são `check_tools`, `analyze_url`, `list_formats` e `download`.
+`--quality` depende do modo: em vídeo, `best` ou uma altura (`1080p`, `720p`...); em áudio, `best` ou um bitrate em kbps (`320`, `256`, `192`, `128`). Combinação inválida é recusada antes de começar.
+
+Se o yt-dlp ou o FFmpeg não estiverem instalados, o comando baixa os dois antes de continuar. O yt-dlp do app também se atualiza sozinho: a cada 6 horas o agente pergunta ao GitHub se há versão nova e, se houver, atualiza antes de seguir. Quando isso acontece, o resultado traz `ytdlp_updated` com as duas versões. `tools` faz essa checagem na hora.
+
+Servidor MCP: `ytdlp-tauri-agent mcp`. Sem argumentos, se a entrada já vier por pipe, ele também sobe como MCP. As ferramentas são `check_tools`, `analyze_url`, `list_formats`, `download` e `cancel_download`.
+
+`download` faz um download por vez. Se a chamada trouxer `progressToken`, o servidor manda `notifications/progress` de 0 a 100 enquanto baixa. Dá para interromper com `cancel_download` ou com `notifications/cancelled`; os arquivos que já terminaram ficam na pasta. Enquanto um download corre, o servidor continua respondendo às outras chamadas.
 
 ```json
 {

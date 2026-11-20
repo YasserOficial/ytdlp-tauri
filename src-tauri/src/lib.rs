@@ -54,15 +54,19 @@ use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-// Configurar comando para esconder janela no Windows
+// Configura todo processo filho (yt-dlp, ffmpeg, where...).
+// Nenhum lê a entrada, então ela é fechada. No servidor MCP isso é obrigatório:
+// a entrada do agente é o canal do protocolo, e no Windows um filho que herda
+// esse pipe trava ao iniciar enquanto o agente espera a próxima mensagem nele.
+// Também esconde a janela de console no Windows.
 #[cfg(target_os = "windows")]
 fn configure_command(cmd: &mut Command) -> &mut Command {
-    cmd.creation_flags(CREATE_NO_WINDOW)
+    cmd.stdin(Stdio::null()).creation_flags(CREATE_NO_WINDOW)
 }
 
 #[cfg(not(target_os = "windows"))]
 fn configure_command(cmd: &mut Command) -> &mut Command {
-    cmd
+    cmd.stdin(Stdio::null())
 }
 
 fn command_exists(name: &str) -> bool {
@@ -682,13 +686,14 @@ async fn download_ffmpeg_linux() -> Result<(), String> {
     fs::create_dir_all(&extract_dir)
         .map_err(|e| format!("Erro ao criar pasta temporária: {}", e))?;
 
-    let status = Command::new("tar")
-        .arg("-xJf")
-        .arg(&archive_path)
-        .arg("-C")
-        .arg(&extract_dir)
-        .status()
-        .map_err(|e| format!("Erro ao extrair FFmpeg com tar: {}", e))?;
+    // output() em vez de status(): o tar não herda a saída, que no MCP é o canal do protocolo
+    let mut tar = Command::new("tar");
+    tar.arg("-xJf").arg(&archive_path).arg("-C").arg(&extract_dir);
+    configure_command(&mut tar);
+    let status = tar
+        .output()
+        .map_err(|e| format!("Erro ao extrair FFmpeg com tar: {}", e))?
+        .status;
 
     if !status.success() {
         return Err("Falha ao extrair o FFmpeg. O pacote xz-utils precisa estar instalado.".to_string());
@@ -1793,7 +1798,7 @@ Servidor MCP: ytdlp-tauri-agent mcp
 Sem argumentos e com a entrada em pipe, também sobe o MCP.
 
 Comandos:
-  tools                         mostra yt-dlp e FFmpeg e instala o que faltar
+  tools                         mostra yt-dlp e FFmpeg, instala o que faltar e atualiza o yt-dlp
   analyze <url>                 lista vídeo ou itens de playlist/rádio
   formats <url>                 lista qualidades de vídeo e áudio
   download <url>                baixa com o mesmo fluxo da interface
@@ -1810,18 +1815,214 @@ Opções:
   --quiet                       omite o progresso e imprime só o resultado
 
 A saída é uma linha JSON por evento. O resultado termina com \"event\":\"result\".
+O yt-dlp do app é atualizado sozinho quando há versão nova (checagem a cada 6 horas);
+quando isso acontece, o resultado traz \"ytdlp_updated\".
 "
 }
 
-async fn ensure_tools() -> Result<ToolsStatus, String> {
-    let status = check_tools().await?;
-    if !status.ytdlp_installed {
+/// De quanto em quanto tempo o agente pergunta ao GitHub se há yt-dlp novo.
+const UPDATE_CHECK_INTERVAL_SECS: u64 = 6 * 60 * 60;
+
+/// Guardado em `tools/update-check.json`, para valer entre um comando e outro.
+#[derive(Serialize, Deserialize, Default)]
+struct UpdateCache {
+    checked_at: u64,
+    installed: Option<String>,
+    installed_mtime: Option<u64>,
+}
+
+fn update_cache_path() -> PathBuf {
+    get_app_tools_dir().join("update-check.json")
+}
+
+fn read_update_cache() -> UpdateCache {
+    fs::read_to_string(update_cache_path())
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+fn write_update_cache(cache: &UpdateCache) {
+    if let Ok(text) = serde_json::to_string(cache) {
+        let _ = fs::write(update_cache_path(), text);
+    }
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0)
+}
+
+fn file_mtime_secs(path: &std::path::Path) -> Option<u64> {
+    fs::metadata(path)
+        .ok()?
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|elapsed| elapsed.as_secs())
+}
+
+/// Versão do yt-dlp do app. Só abre o yt-dlp (uns 3 s no Windows) quando o
+/// arquivo mudou desde a última vez; senão usa a versão guardada.
+async fn installed_ytdlp_version(cache: &mut UpdateCache) -> Option<String> {
+    let path = get_ytdlp_exe_path();
+    let mtime = file_mtime_secs(&path)?;
+    if cache.installed_mtime == Some(mtime) {
+        if let Some(version) = &cache.installed {
+            return Some(version.clone());
+        }
+    }
+    let mut cmd = Command::new(&path);
+    cmd.arg("--version");
+    let output = run_output(cmd).await.ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    cache.installed = Some(version.clone());
+    cache.installed_mtime = Some(mtime);
+    Some(version)
+}
+
+/// Atualiza o yt-dlp do app quando o GitHub tem versão nova. Sem `force`, só
+/// consulta o GitHub se a última checagem tem mais de 6 horas. Um yt-dlp do
+/// sistema (no PATH) nunca é tocado. Devolve `{from, to}` quando atualizou.
+async fn refresh_ytdlp(force: bool) -> Result<Option<serde_json::Value>, String> {
+    if !get_ytdlp_exe_path().exists() {
+        return Ok(None);
+    }
+    let mut cache = read_update_cache();
+    let now = now_secs();
+    if !force && now.saturating_sub(cache.checked_at) < UPDATE_CHECK_INTERVAL_SECS {
+        return Ok(None);
+    }
+    // Marca a checagem mesmo se a rede falhar, para não tentar de novo a cada comando
+    cache.checked_at = now;
+    let latest = get_ytdlp_latest_version().await.ok();
+    let installed = installed_ytdlp_version(&mut cache).await;
+    let mut updated = None;
+    if let (Some(latest), Some(installed)) = (latest, installed) {
+        if latest.trim() != installed.trim() {
+            // Falha ao trocar o arquivo (por exemplo, a interface usando o yt-dlp agora)
+            // não impede o comando: segue com a versão atual e tenta na próxima vez.
+            match download_ytdlp().await {
+                Ok(()) => {
+                    cache.installed = Some(latest.trim().to_string());
+                    cache.installed_mtime = file_mtime_secs(&get_ytdlp_exe_path());
+                    updated = Some(serde_json::json!({ "from": installed.trim(), "to": latest.trim() }));
+                }
+                Err(_) => cache.checked_at = 0,
+            }
+        }
+    }
+    write_update_cache(&cache);
+    Ok(updated)
+}
+
+/// Instala o que falta. Só confere se os arquivos existem, sem abrir nada.
+async fn install_missing_tools() -> Result<(), String> {
+    if !get_ytdlp_exe_path().exists() && !command_exists("yt-dlp") {
         download_ytdlp().await?;
     }
-    if !status.ffmpeg_installed {
+    if locate_ffmpeg().is_none() {
         download_ffmpeg().await?;
     }
-    check_tools().await
+    Ok(())
+}
+
+/// Comando `tools` e ferramenta `check_tools`: instala o que falta, força a
+/// checagem de update do yt-dlp e mostra as versões.
+async fn ensure_tools() -> Result<(ToolsStatus, Option<serde_json::Value>), String> {
+    install_missing_tools().await?;
+    let updated = refresh_ytdlp(true).await?;
+    let status = check_tools().await?;
+    Ok((status, updated))
+}
+
+/// Antes de analisar ou baixar. Na maioria das vezes custa milissegundos; a cada
+/// 6 horas pergunta ao GitHub e, se houver yt-dlp novo, atualiza antes de seguir.
+async fn ensure_tools_ready() -> Result<Option<serde_json::Value>, String> {
+    install_missing_tools().await?;
+    refresh_ytdlp(false).await
+}
+
+/// Junta ao resultado o aviso de que o yt-dlp foi atualizado nesta chamada.
+fn with_update(mut result: serde_json::Value, updated: Option<serde_json::Value>) -> serde_json::Value {
+    if let (Some(updated), Some(object)) = (updated, result.as_object_mut()) {
+        object.insert("ytdlp_updated".to_string(), updated);
+    }
+    result
+}
+
+/// `~`, `~/pasta` e `~\pasta` viram a pasta pessoal. O shell não expande `~` entre aspas.
+fn expand_home(path: &str) -> String {
+    let rest = if path == "~" {
+        Some("")
+    } else {
+        path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\"))
+    };
+    let Some(rest) = rest else {
+        return path.to_string();
+    };
+    let home = if cfg!(target_os = "windows") {
+        env::var("USERPROFILE")
+    } else {
+        env::var("HOME")
+    };
+    match home {
+        Ok(home) if !home.is_empty() => {
+            if rest.is_empty() {
+                home
+            } else {
+                PathBuf::from(home).join(rest).to_string_lossy().to_string()
+            }
+        }
+        _ => path.to_string(),
+    }
+}
+
+/// Recusa cedo, com mensagem clara, o que o yt-dlp só recusaria lá dentro.
+fn validate_download_request(mode: &str, quality: &str) -> Result<(), String> {
+    match mode {
+        "video" => {
+            if quality == "best" || quality_height(quality).is_some() {
+                Ok(())
+            } else {
+                Err(format!(
+                    "Qualidade de vídeo inválida: {quality}. Use best ou uma altura como 1080p, 720p, 480p ou 360p."
+                ))
+            }
+        }
+        "audio" => {
+            let bitrate_ok = quality
+                .parse::<u32>()
+                .map(|kbps| (32..=320).contains(&kbps))
+                .unwrap_or(false);
+            if quality == "best" || bitrate_ok {
+                Ok(())
+            } else {
+                Err(format!(
+                    "Qualidade de áudio inválida: {quality}. Use best ou um bitrate em kbps, como 320, 256, 192 ou 128."
+                ))
+            }
+        }
+        _ => Err("O modo precisa ser video ou audio".to_string()),
+    }
+}
+
+/// Progresso geral de 0 a 100, contando os itens já terminados.
+fn overall_progress(progress: &DownloadProgress) -> f64 {
+    let total = progress.total.max(1) as f64;
+    let done = progress.current.saturating_sub(1).min(progress.total) as f64;
+    let item = (progress.progress as f64).clamp(0.0, 100.0) / 100.0;
+    if progress.status == "completed" {
+        100.0
+    } else {
+        ((done + item) / total * 100.0).clamp(0.0, 100.0)
+    }
 }
 
 async fn agent_main(args: Vec<String>) -> i32 {
@@ -1840,50 +2041,61 @@ async fn agent_main(args: Vec<String>) -> i32 {
     };
     let url = flags.positionals.first().cloned();
     let firefox = flags.firefox;
-    let cookies = flags.cookies.clone();
+    let cookies = flags.cookies.as_deref().map(expand_home);
 
     let run = async {
         match command.as_str() {
             "tools" => {
-                let status = ensure_tools().await?;
-                print_agent_json(&serde_json::json!({
-                    "event": "result",
-                    "ok": true,
-                    "tools": status,
-                }));
+                let (status, updated) = ensure_tools().await?;
+                print_agent_json(&with_update(
+                    serde_json::json!({
+                        "event": "result",
+                        "ok": true,
+                        "tools": status,
+                    }),
+                    updated,
+                ));
                 Ok(0)
             }
             "analyze" => {
                 let url = url.ok_or("Informe a URL")?;
-                ensure_tools().await?;
+                let updated = ensure_tools_ready().await?;
                 let result = analyze_url(url, flags.radio_limit, cookies, Some(firefox)).await?;
-                print_agent_json(&serde_json::json!({
-                    "event": "result",
-                    "ok": true,
-                    "analysis": result,
-                }));
+                print_agent_json(&with_update(
+                    serde_json::json!({
+                        "event": "result",
+                        "ok": true,
+                        "analysis": result,
+                    }),
+                    updated,
+                ));
                 Ok(0)
             }
             "formats" => {
                 let url = url.ok_or("Informe a URL")?;
-                ensure_tools().await?;
+                let updated = ensure_tools_ready().await?;
                 let result = get_formats(url, cookies, Some(firefox)).await?;
-                print_agent_json(&serde_json::json!({
-                    "event": "result",
-                    "ok": true,
-                    "formats": result,
-                }));
+                print_agent_json(&with_update(
+                    serde_json::json!({
+                        "event": "result",
+                        "ok": true,
+                        "formats": result,
+                    }),
+                    updated,
+                ));
                 Ok(0)
             }
             "download" => {
                 let url = url.ok_or("Informe a URL")?;
                 let mode = flags.mode.clone().ok_or("Informe --mode video ou --mode audio")?;
-                if mode != "video" && mode != "audio" {
-                    return Err("O modo precisa ser video ou audio".to_string());
-                }
                 let quality = flags.quality.clone().ok_or("Informe --quality")?;
-                let destination = flags.out.clone().ok_or("Informe --out com a pasta de destino")?;
-                ensure_tools().await?;
+                validate_download_request(&mode, &quality)?;
+                let destination = flags
+                    .out
+                    .as_deref()
+                    .map(expand_home)
+                    .ok_or("Informe --out com a pasta de destino")?;
+                let updated = ensure_tools_ready().await?;
                 let options = DownloadOptions {
                     url,
                     destination,
@@ -1906,12 +2118,16 @@ async fn agent_main(args: Vec<String>) -> i32 {
                     }
                 })
                 .await?;
-                print_agent_json(&serde_json::json!({
-                    "event": "result",
-                    "ok": true,
-                    "files": outcome.files,
-                    "warning": outcome.warning,
-                }));
+                print_agent_json(&with_update(
+                    serde_json::json!({
+                        "event": "result",
+                        "ok": true,
+                        "files": outcome.files,
+                        "warning": outcome.warning,
+                        "cancelled": outcome.cancelled,
+                    }),
+                    updated,
+                ));
                 Ok(if outcome.warning.is_some() { 2 } else { 0 })
             }
             other => Err(format!("Comando desconhecido: {other}")),
@@ -1924,6 +2140,8 @@ async fn agent_main(args: Vec<String>) -> i32 {
     }
 }
 
+/// Uma mensagem JSON-RPC por linha. `println!` trava o stdout durante a escrita,
+/// então respostas de threads diferentes não se misturam.
 fn mcp_write(value: &serde_json::Value) {
     println!("{}", value);
     let _ = std::io::stdout().flush();
@@ -1972,19 +2190,19 @@ fn mcp_tools() -> serde_json::Value {
     serde_json::json!([
         {
             "name": "check_tools",
-            "description": "Verifica yt-dlp e FFmpeg nesta máquina e instala o que faltar. Não abre a interface.",
+            "description": "Mostra as versões do yt-dlp e do FFmpeg nesta máquina, avisa se há yt-dlp novo e instala o que faltar. As outras ferramentas já instalam o que faltar sozinhas; esta é só para conferir.",
             "inputSchema": { "type": "object", "properties": {} }
         },
         {
             "name": "analyze_url",
-            "description": "Analisa uma URL. Vídeo único ou lista de itens de playlist e rádio, com título, link e duração.",
+            "description": "Analisa uma URL. Vídeo único ou lista de itens de playlist e rádio, com título, link e duração. Para um vídeo dentro de playlist, `video` traz só o vídeo do link.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "url": { "type": "string", "description": "URL do vídeo, playlist ou rádio" },
                     "radio_limit": { "type": "integer", "description": "Máximo de itens quando a URL é uma rádio. Padrão 50." },
                     "firefox": { "type": "boolean", "description": "Usar os cookies do Firefox desta máquina" },
-                    "cookies": { "type": "string", "description": "Caminho de um arquivo de cookies Netscape" }
+                    "cookies": { "type": "string", "description": "Caminho de um arquivo de cookies Netscape (aceita ~)" }
                 },
                 "required": ["url"]
             }
@@ -1997,64 +2215,105 @@ fn mcp_tools() -> serde_json::Value {
                 "properties": {
                     "url": { "type": "string" },
                     "firefox": { "type": "boolean", "description": "Usar os cookies do Firefox desta máquina" },
-                    "cookies": { "type": "string", "description": "Caminho de um arquivo de cookies Netscape" }
+                    "cookies": { "type": "string", "description": "Caminho de um arquivo de cookies Netscape (aceita ~)" }
                 },
                 "required": ["url"]
             }
         },
         {
             "name": "download",
-            "description": "Baixa vídeo ou áudio com o mesmo fluxo da interface: formato por site, FFmpeg, cookies e limpeza se falhar.",
+            "description": "Baixa vídeo ou áudio com o mesmo fluxo da interface: formato por site, FFmpeg, cookies e limpeza se falhar. Um download por vez. Manda notifications/progress quando a chamada traz progressToken e pode ser interrompido com cancel_download ou notifications/cancelled. Se parte de uma lista falhar, os arquivos prontos ficam e o resultado traz `warning`.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "url": { "type": "string" },
                     "mode": { "type": "string", "enum": ["video", "audio"] },
-                    "quality": { "type": "string", "description": "1080p, 720p, 480p, 360p, best, 320, 256, 192 ou 128" },
-                    "out": { "type": "string", "description": "Pasta de destino" },
+                    "quality": { "type": "string", "description": "Vídeo: best ou uma altura (1080p, 720p, 480p, 360p...). Áudio: best ou um bitrate em kbps (320, 256, 192, 128)." },
+                    "out": { "type": "string", "description": "Pasta de destino (aceita ~)" },
                     "firefox": { "type": "boolean", "description": "Usar os cookies do Firefox desta máquina" },
-                    "cookies": { "type": "string", "description": "Caminho de um arquivo de cookies Netscape" },
+                    "cookies": { "type": "string", "description": "Caminho de um arquivo de cookies Netscape (aceita ~)" },
                     "items": { "type": "array", "items": { "type": "string" }, "description": "URLs escolhidas de uma playlist. Vazio baixa a URL principal." }
                 },
                 "required": ["url", "mode", "quality", "out"]
             }
+        },
+        {
+            "name": "cancel_download",
+            "description": "Interrompe o download em andamento. Os arquivos que já terminaram ficam na pasta.",
+            "inputSchema": { "type": "object", "properties": {} }
         }
     ])
 }
 
-async fn mcp_call_tool(name: &str, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+/// Id da chamada `download` em andamento no MCP. Só um download por vez.
+static MCP_DOWNLOAD: Mutex<Option<serde_json::Value>> = Mutex::new(None);
+
+/// Libera a vaga do download quando a chamada termina, mesmo com erro.
+struct McpDownloadSlot;
+
+impl McpDownloadSlot {
+    fn take(request_id: &serde_json::Value) -> Result<Self, String> {
+        let mut slot = MCP_DOWNLOAD.lock().map_err(|_| "Estado do download indisponível".to_string())?;
+        if slot.is_some() {
+            return Err("Já há um download em andamento. Espere terminar ou use cancel_download.".to_string());
+        }
+        *slot = Some(request_id.clone());
+        Ok(McpDownloadSlot)
+    }
+}
+
+impl Drop for McpDownloadSlot {
+    fn drop(&mut self) {
+        if let Ok(mut slot) = MCP_DOWNLOAD.lock() {
+            *slot = None;
+        }
+    }
+}
+
+async fn mcp_call_tool(
+    name: &str,
+    args: &serde_json::Value,
+    request_id: &serde_json::Value,
+    progress_token: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
     let firefox = mcp_arg_bool(args, "firefox");
-    let cookies = mcp_arg_string(args, "cookies");
+    let cookies = mcp_arg_string(args, "cookies").map(|path| expand_home(&path));
     match name {
         "check_tools" => {
-            let status = ensure_tools().await?;
-            Ok(serde_json::json!({ "ok": true, "tools": status }))
+            let (status, updated) = ensure_tools().await?;
+            Ok(with_update(serde_json::json!({ "ok": true, "tools": status }), updated))
         }
         "analyze_url" => {
             let url = mcp_arg_string(args, "url").ok_or("Informe url")?;
             let radio_limit = args.get("radio_limit").and_then(|value| value.as_u64()).unwrap_or(50) as u32;
-            ensure_tools().await?;
+            let updated = ensure_tools_ready().await?;
             let analysis = analyze_url(url, radio_limit, cookies, Some(firefox)).await?;
-            Ok(serde_json::json!({ "ok": true, "analysis": analysis }))
+            Ok(with_update(serde_json::json!({ "ok": true, "analysis": analysis }), updated))
         }
         "list_formats" => {
             let url = mcp_arg_string(args, "url").ok_or("Informe url")?;
-            ensure_tools().await?;
+            let updated = ensure_tools_ready().await?;
             let formats = get_formats(url, cookies, Some(firefox)).await?;
-            Ok(serde_json::json!({ "ok": true, "formats": formats }))
+            Ok(with_update(serde_json::json!({ "ok": true, "formats": formats }), updated))
         }
         "download" => {
             let url = mcp_arg_string(args, "url").ok_or("Informe url")?;
             let mode = mcp_arg_string(args, "mode").ok_or("Informe mode video ou audio")?;
-            if mode != "video" && mode != "audio" {
-                return Err("O modo precisa ser video ou audio".to_string());
-            }
             let quality = mcp_arg_string(args, "quality").ok_or("Informe quality")?;
-            let destination = mcp_arg_string(args, "out").ok_or("Informe out com a pasta de destino")?;
+            validate_download_request(&mode, &quality)?;
+            let destination = mcp_arg_string(args, "out")
+                .map(|path| expand_home(&path))
+                .ok_or("Informe out com a pasta de destino")?;
             let items = args.get("items").and_then(|value| value.as_array()).map(|list| {
                 list.iter().filter_map(|item| item.as_str().map(|text| text.to_string())).collect::<Vec<_>>()
             });
-            ensure_tools().await?;
+            let _slot = McpDownloadSlot::take(request_id)?;
+            let updated = ensure_tools_ready().await?;
+
+            // Progresso só quando o cliente pediu (progressToken), sempre crescente e
+            // sem inundar o cliente: manda quando sobe meio ponto ou muda o estado.
+            let mut last_sent = -1.0_f64;
+            let mut last_status = String::new();
             let outcome = run_download(
                 DownloadOptions {
                     url,
@@ -2065,10 +2324,59 @@ async fn mcp_call_tool(name: &str, args: &serde_json::Value) -> Result<serde_jso
                     use_browser_cookies: Some(firefox),
                     selected_items: items.filter(|list| !list.is_empty()),
                 },
-                |_| {},
+                |progress| {
+                    let Some(token) = &progress_token else {
+                        return;
+                    };
+                    let value = overall_progress(progress).max(last_sent.max(0.0));
+                    if value - last_sent < 0.5 && progress.status == last_status {
+                        return;
+                    }
+                    last_sent = value;
+                    last_status = progress.status.clone();
+                    let mut message = format!("{} ({} de {})", progress.status, progress.current.max(1), progress.total);
+                    if !progress.filename.is_empty() {
+                        message.push_str(&format!(" {}", progress.filename));
+                    }
+                    if !progress.speed.is_empty() {
+                        message.push_str(&format!(" · {}", progress.speed));
+                    }
+                    if !progress.eta.is_empty() {
+                        message.push_str(&format!(" · faltam {}", progress.eta));
+                    }
+                    mcp_write(&serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "method": "notifications/progress",
+                        "params": {
+                            "progressToken": token,
+                            "progress": (value * 10.0).round() / 10.0,
+                            "total": 100,
+                            "message": message,
+                        }
+                    }));
+                },
             )
             .await?;
-            Ok(serde_json::json!({ "ok": true, "files": outcome.files, "warning": outcome.warning }))
+            Ok(with_update(
+                serde_json::json!({
+                    "ok": true,
+                    "files": outcome.files,
+                    "warning": outcome.warning,
+                    "cancelled": outcome.cancelled,
+                }),
+                updated,
+            ))
+        }
+        "cancel_download" => {
+            let running = MCP_DOWNLOAD.lock().map(|slot| slot.is_some()).unwrap_or(false);
+            if running {
+                cancel_download()?;
+            }
+            Ok(serde_json::json!({
+                "ok": true,
+                "cancelled": running,
+                "message": if running { "Download interrompido." } else { "Nenhum download em andamento." },
+            }))
         }
         other => Err(format!("Ferramenta desconhecida: {other}")),
     }
@@ -2113,11 +2421,33 @@ fn read_mcp_message(reader: &mut impl std::io::BufRead) -> Result<Option<serde_j
     }
 }
 
-fn handle_mcp_message(message: &serde_json::Value) -> Result<(), String> {
+/// Versões do protocolo que este servidor fala. A primeira é a mais nova.
+const MCP_PROTOCOLS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
+
+/// Responde na hora o que é rápido. `tools/call` roda em outra thread, para o
+/// servidor continuar lendo: assim chegam `ping`, `cancel_download` e
+/// `notifications/cancelled` enquanto um download corre.
+fn handle_mcp_message(message: &serde_json::Value, workers: &mut Vec<std::thread::JoinHandle<()>>) {
     let method = message.get("method").and_then(|value| value.as_str()).unwrap_or("");
+
+    if method == "notifications/cancelled" {
+        let request_id = message.pointer("/params/requestId");
+        let is_download = MCP_DOWNLOAD
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone())
+            .zip(request_id)
+            .map(|(running, cancelled)| &running == cancelled)
+            .unwrap_or(false);
+        if is_download {
+            let _ = cancel_download();
+        }
+        return;
+    }
+
     let id = match message.get("id") {
-        Some(id) if !id.is_null() => id,
-        _ => return Ok(()),
+        Some(id) if !id.is_null() => id.clone(),
+        _ => return,
     };
 
     match method {
@@ -2125,52 +2455,60 @@ fn handle_mcp_message(message: &serde_json::Value) -> Result<(), String> {
             let requested = message
                 .pointer("/params/protocolVersion")
                 .and_then(|value| value.as_str())
-                .unwrap_or("2024-11-05");
-            let protocol = if requested == "2025-03-26" || requested == "2024-11-05" {
-                requested
-            } else {
-                "2024-11-05"
-            };
-            mcp_result(id, serde_json::json!({
+                .unwrap_or(MCP_PROTOCOLS[0]);
+            let protocol = MCP_PROTOCOLS
+                .iter()
+                .find(|version| **version == requested)
+                .copied()
+                .unwrap_or(MCP_PROTOCOLS[0]);
+            mcp_result(&id, serde_json::json!({
                 "protocolVersion": protocol,
                 "capabilities": { "tools": { "listChanged": false } },
                 "serverInfo": { "name": "ytdlp-tauri-agent", "version": env!("CARGO_PKG_VERSION") }
             }));
         }
-        "ping" => mcp_result(id, serde_json::json!({})),
-        "tools/list" => mcp_result(id, serde_json::json!({ "tools": mcp_tools() })),
+        "ping" => mcp_result(&id, serde_json::json!({})),
+        "tools/list" => mcp_result(&id, serde_json::json!({ "tools": mcp_tools() })),
         "tools/call" => {
-            let name = message.pointer("/params/name").and_then(|value| value.as_str()).unwrap_or("");
+            let name = message.pointer("/params/name").and_then(|value| value.as_str()).unwrap_or("").to_string();
             let arguments = message.pointer("/params/arguments").cloned().unwrap_or_else(|| serde_json::json!({}));
-            let result = match async_runtime::block_on(mcp_call_tool(name, &arguments)) {
-                Ok(value) => mcp_tool_text(value, false),
-                Err(error) => mcp_tool_text(serde_json::Value::String(error), true),
-            };
-            mcp_result(id, result);
+            let progress_token = message.pointer("/params/_meta/progressToken").cloned();
+            workers.retain(|worker| !worker.is_finished());
+            workers.push(std::thread::spawn(move || {
+                let result = match async_runtime::block_on(mcp_call_tool(&name, &arguments, &id, progress_token)) {
+                    Ok(value) => mcp_tool_text(value, false),
+                    Err(error) => mcp_tool_text(serde_json::Value::String(error), true),
+                };
+                mcp_result(&id, result);
+            }));
         }
-        _ => mcp_error(id, -32601, format!("Método não suportado: {method}")),
+        _ => mcp_error(&id, -32601, format!("Método não suportado: {method}")),
     }
-    Ok(())
 }
 
 fn run_mcp() -> i32 {
     let stdin = std::io::stdin();
     let mut reader = std::io::BufReader::new(stdin.lock());
-    loop {
+    let mut workers: Vec<std::thread::JoinHandle<()>> = Vec::new();
+    let code = loop {
         match read_mcp_message(&mut reader) {
-            Ok(Some(message)) => {
-                if let Err(error) = handle_mcp_message(&message) {
-                    let _ = writeln!(std::io::stderr(), "{error}");
-                    return 1;
-                }
-            }
-            Ok(None) => return 0,
+            Ok(Some(message)) => handle_mcp_message(&message, &mut workers),
+            Ok(None) => break 0,
             Err(error) => {
                 let _ = writeln!(std::io::stderr(), "{error}");
-                return 1;
+                break 1;
             }
         }
+    };
+    // O cliente fechou a conexão: para um download que ainda corre e espera as
+    // respostas pendentes antes de sair, para não deixar o yt-dlp órfão.
+    if MCP_DOWNLOAD.lock().map(|slot| slot.is_some()).unwrap_or(false) {
+        let _ = cancel_download();
     }
+    for worker in workers {
+        let _ = worker.join();
+    }
+    code
 }
 
 fn wants_mcp(args: &[String]) -> bool {
@@ -2275,5 +2613,51 @@ mod tests {
         let files = finished_outputs(&[source, mp3.clone()], true);
         assert_eq!(files, vec![mp3]);
         let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod agent_tests {
+    use super::*;
+
+    #[test]
+    fn expand_home_only_touches_leading_tilde() {
+        let home = if cfg!(target_os = "windows") { env::var("USERPROFILE") } else { env::var("HOME") }.unwrap();
+        assert_eq!(expand_home("~"), home);
+        assert_eq!(expand_home("~/Videos"), PathBuf::from(&home).join("Videos").to_string_lossy());
+        assert_eq!(expand_home(r"~\Videos"), PathBuf::from(&home).join("Videos").to_string_lossy());
+        assert_eq!(expand_home("/tmp/~x"), "/tmp/~x");
+        assert_eq!(expand_home("~fulano/x"), "~fulano/x");
+    }
+
+    #[test]
+    fn quality_is_checked_per_mode() {
+        assert!(validate_download_request("video", "best").is_ok());
+        assert!(validate_download_request("video", "720p").is_ok());
+        assert!(validate_download_request("video", "320").is_err());
+        assert!(validate_download_request("audio", "320").is_ok());
+        assert!(validate_download_request("audio", "best").is_ok());
+        assert!(validate_download_request("audio", "720p").is_err());
+        assert!(validate_download_request("audio", "999").is_err());
+        assert!(validate_download_request("gif", "best").is_err());
+    }
+
+    #[test]
+    fn overall_progress_counts_finished_items() {
+        let mut progress = DownloadProgress {
+            status: "downloading".to_string(),
+            progress: 50.0,
+            speed: String::new(),
+            eta: String::new(),
+            filename: String::new(),
+            current: 3,
+            total: 4,
+        };
+        assert_eq!(overall_progress(&progress), 62.5);
+        progress.current = 1;
+        progress.progress = 0.0;
+        assert_eq!(overall_progress(&progress), 0.0);
+        progress.status = "completed".to_string();
+        assert_eq!(overall_progress(&progress), 100.0);
     }
 }
