@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">YT-DLP GUI</string>
+    
+    <!-- Setup Screen -->
+    <string name="welcome">Bem-vindo!</string>
+    <string name="app_description">Baixe vídeos e músicas do YouTube, Twitter, Instagram e mais de 1000 sites.</string>
+    <string name="ytdlp_ready">yt-dlp pronto</string>
+    <string name="ytdlp_initializing">Inicializando yt-dlp…</string>
+    <string name="update">Atualizar</string>
+    <string name="start">Começar</string>
+    
+    <!-- URL Input Screen -->
+    <string name="paste_url">Cole a URL</string>
+    <string name="url_hint">https://youtube.com/watch?v=...</string>
+    <string name="search">Buscar</string>
+    <string name="back">Voltar</string>
+    <string name="connected">Conectado</string>
+    <string name="not_connected">Não conectado</string>
+    <string name="private_access">Acesso a vídeos privados</string>
+    <string name="public_only">Apenas vídeos públicos</string>
+    <string name="login">Login</string>
+    <string name="logout">Sair</string>
+    <string name="content_requires_login">Este conteúdo requer login</string>
+    <string name="login_youtube">Fazer login no YouTube</string>
+    
+    <!-- Auth Screen -->
+    <string name="authentication">Autenticação</string>
+    <string name="auth_description">Para acessar vídeos privados ou conteúdo exclusivo, você precisa fazer login no YouTube.</string>
+    <string name="auth_warning">Seus dados de login ficam apenas no seu dispositivo e são usados apenas para baixar vídeos.</string>
+    <string name="skip">Pular</string>
+    <string name="login_detected">Login detectado!</string>
+    <string name="continue_text">Continuar</string>
+    
+    <!-- Loading Screen -->
+    <string name="fetching_info">Buscando informações…</string>
+    <string name="please_wait">Isso pode levar alguns segundos</string>
+    <string name="tip_playlist">Dica: Para playlists grandes, a busca pode demorar mais.</string>
+    
+    <!-- Content Type Screen -->
+    <string name="video_found">Vídeo Encontrado</string>
+    <string name="playlist_found">Playlist Encontrada</string>
+    <string name="channel_found">Canal Encontrado</string>
+    <string name="videos_count">%d vídeos</string>
+    
+    <!-- Selection Screen -->
+    <string name="select_videos">Selecione os vídeos</string>
+    <string name="selected_count">%d de %d selecionados</string>
+    <string name="select_all">Marcar todos</string>
+    <string name="deselect_all">Desmarcar</string>
+    
+    <!-- Format Screen -->
+    <string name="choose_format">Escolha o formato</string>
+    <string name="videos_selected">%d vídeo(s) selecionado(s)</string>
+    <string name="best_quality">Melhor Qualidade</string>
+    <string name="best_quality_desc">Maior resolução disponível</string>
+    <string name="fullhd">Full HD (1080p)</string>
+    <string name="fullhd_desc">Boa qualidade, tamanho moderado</string>
+    <string name="hd">HD (720p)</string>
+    <string name="hd_desc">Equilíbrio entre qualidade e tamanho</string>
+    <string name="sd">SD (480p)</string>
+    <string name="sd_desc">Arquivos menores, economiza espaço</string>
+    <string name="audio_only">Apenas Áudio (MP3)</string>
+    <string name="audio_only_desc">Extrai apenas o áudio do vídeo</string>
+    <string name="download">Baixar</string>
+    
+    <!-- Download Screen -->
+    <string name="downloading">Baixando…</string>
+    <string name="completed">Concluído!</string>
+    <string name="completed_count">%d de %d concluídos</string>
+    <string name="overall_progress">Progresso geral: %d%%</string>
+    <string name="pending">Aguardando</string>
+    <string name="converting">Convertendo…</string>
+    <string name="failed">Erro</string>
+    <string name="cancelled">Cancelado</string>
+    <string name="time_remaining">Tempo restante: %s</string>
+    <string name="view_files">Ver arquivos</string>
+    <string name="new_download">Novo download</string>
+    
+    <!-- Notifications -->
+    <string name="notification_channel_name">Downloads</string>
+    <string name="notification_channel_description">Notificações de progresso de download</string>
+    <string name="notification_downloading">Baixando: %s</string>
+    <string name="notification_completed">Download concluído: %s</string>
+    <string name="notification_failed">Falha no download: %s</string>
+</resources>

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Primary Colors -->
+    <color name="purple_500">#6366F1</color>
+    <color name="purple_700">#4F46E5</color>
+    <color name="pink_500">#EC4899</color>
+    <color name="pink_700">#DB2777</color>
+    
+    <!-- Background Colors -->
+    <color name="dark_background">#0F0F23</color>
+    <color name="dark_surface">#1A1A2E</color>
+    <color name="light_background">#F5F5F5</color>
+    <color name="light_surface">#FFFFFF</color>
+    
+    <!-- Gradient Colors -->
+    <color name="gradient_start">#6366F1</color>
+    <color name="gradient_end">#EC4899</color>
+    
+    <!-- Status Colors -->
+    <color name="success">#22C55E</color>
+    <color name="error">#EF4444</color>
+    <color name="warning">#F59E0B</color>
+    
+    <!-- Glass Effect -->
+    <color name="glass_white_15">#26FFFFFF</color>
+    <color name="glass_white_10">#1AFFFFFF</color>
+    <color name="glass_white_05">#0DFFFFFF</color>
+    <color name="glass_border">#4DFFFFFF</color>
+</resources>
