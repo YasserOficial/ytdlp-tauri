@@ -29,18 +29,18 @@ Um assistente em passos: cole o link, escolha o que baixar, o formato e a pasta.
 - Escolher itens de uma lista antes de começar
 - Salvar em vídeo (melhor, 1080p, 720p, 480p, 360p) ou em áudio (melhor, 320, 256, 192, 128 kbps)
 - Ver duração, estimativa de tamanho e o resumo da qualidade escolhida
-- Usar os cookies do Firefox quando o conteúdo pede login, sem exportar arquivo
+- Usar os cookies do Firefox quando o conteúdo pede login, sem exportar arquivo, ou um `cookies.txt` (opção avançada)
 - Esperar um minuto depois de um bloqueio do YouTube antes de consultar de novo
 - Voltar nos passos sem repetir a consulta ao site
-- Acompanhar progresso, velocidade e tempo restante, e ver o erro real se o download falhar
+- Acompanhar progresso, velocidade e tempo restante, cancelar a qualquer momento e ver o erro real se o download falhar
 - Abrir a pasta quando o download termina
 
 ## Como baixar
 
-A versão atual é a **0.1.6**, em [Releases](https://github.com/YasserOficial/ytdlp-tauri/releases/tag/v0.1.6).
+A versão atual é a **0.1.7**, em [Releases](https://github.com/YasserOficial/ytdlp-tauri/releases/tag/v0.1.7).
 
-- **Windows:** `YT-DLP GUI_0.1.6_x64-setup.exe` (instalador NSIS). O `.msi` é a alternativa. O instalador pede permissão de administrador.
-- **Linux (Ubuntu 24.04 e derivados):** `YT-DLP GUI_0.1.6_amd64.deb`. Instale com `sudo apt install ./YT-DLP\ GUI_0.1.6_amd64.deb` para o apt trazer o WebKitGTK. O pacote depende de `libwebkit2gtk-4.1-0` e `libgtk-3-0`. No Ubuntu 22.04 esses nomes não existem, então este `.deb` não serve lá.
+- **Windows:** `YT-DLP GUI_0.1.7_x64-setup.exe` (instalador NSIS). O `.msi` é a alternativa. O instalador pede permissão de administrador.
+- **Linux (Ubuntu 24.04 e derivados):** `YT-DLP GUI_0.1.7_amd64.deb`. Instale com `sudo apt install ./YT-DLP\ GUI_0.1.7_amd64.deb` para o apt trazer o WebKitGTK. O pacote depende de `libwebkit2gtk-4.1-0` e `libgtk-3-0`. No Ubuntu 22.04 esses nomes não existem, então este `.deb` não serve lá.
 - **Agente:** `ytdlp-tauri-agent-windows-x64.zip` ou `ytdlp-tauri-agent-linux-x64.tar.gz`. É o mesmo programa sem a janela: comando manual ou servidor MCP.
 
 ## Como usar
