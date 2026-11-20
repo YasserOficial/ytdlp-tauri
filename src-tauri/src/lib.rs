@@ -44,20 +44,7 @@ async fn wait_out_cooldown() {
     if wait.is_zero() {
         return;
     }
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        std::thread::sleep(wait);
-        let _ = tx.send(());
-    });
-    loop {
-        match rx.try_recv() {
-            Ok(_) | Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                async_runtime::spawn(async {}).await.ok();
-                std::thread::sleep(Duration::from_millis(100));
-            }
-        }
-    }
+    let _ = async_runtime::spawn_blocking(move || std::thread::sleep(wait)).await;
 }
 
 #[cfg(target_os = "windows")]
@@ -137,63 +124,58 @@ fn detect_source(url: &str) -> VideoSource {
 }
 
 // Obter string de formato apropriada para cada fonte e qualidade
+fn quality_height(quality: &str) -> Option<u32> {
+    let number = quality.strip_suffix('p')?;
+    if number.is_empty() || !number.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    number.parse().ok()
+}
+
 fn get_format_string(source: &VideoSource, quality: &str) -> String {
-    match source {
-        VideoSource::YouTube => {
-            // YouTube suporta formatos separados de vídeo/áudio
-            match quality {
-                "best" => "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best".to_string(),
-                "1080p" => "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]".to_string(),
-                "720p" => "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]".to_string(),
-                "480p" => "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]".to_string(),
-                "360p" => "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=360]+bestaudio/best[height<=360]".to_string(),
-                _ => "best".to_string(),
-            }
-        },
-        VideoSource::Instagram => {
-            // Instagram geralmente tem formatos combinados, usar fallbacks mais flexíveis
-            match quality {
-                "best" => "best[ext=mp4]/best".to_string(),
-                "1080p" => "best[height<=1080][ext=mp4]/best[height<=1080]/best".to_string(),
-                "720p" => "best[height<=720][ext=mp4]/best[height<=720]/best".to_string(),
-                "480p" => "best[height<=480][ext=mp4]/best[height<=480]/best".to_string(),
-                "360p" => "best[height<=360][ext=mp4]/best[height<=360]/best".to_string(),
-                _ => "best".to_string(),
-            }
-        },
-        VideoSource::Twitter => {
-            // Twitter/X também usa formatos combinados
-            match quality {
-                "best" => "best[ext=mp4]/best".to_string(),
-                "1080p" => "best[height<=1080][ext=mp4]/best[height<=1080]/best".to_string(),
-                "720p" => "best[height<=720][ext=mp4]/best[height<=720]/best".to_string(),
-                "480p" => "best[height<=480][ext=mp4]/best[height<=480]/best".to_string(),
-                "360p" => "best[height<=360][ext=mp4]/best[height<=360]/best".to_string(),
-                _ => "best".to_string(),
-            }
-        },
-        VideoSource::Vimeo => {
-            // Vimeo suporta formatos separados como YouTube
-            match quality {
-                "best" => "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best".to_string(),
-                "1080p" => "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]".to_string(),
-                "720p" => "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]".to_string(),
-                "480p" => "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]".to_string(),
-                "360p" => "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=360]+bestaudio/best[height<=360]".to_string(),
-                _ => "best".to_string(),
-            }
-        },
-        VideoSource::Other => {
-            // Formato genérico e flexível para outras fontes
-            match quality {
-                "best" => "best[ext=mp4]/best".to_string(),
-                "1080p" => "best[height<=1080]/best".to_string(),
-                "720p" => "best[height<=720]/best".to_string(),
-                "480p" => "best[height<=480]/best".to_string(),
-                "360p" => "best[height<=360]/best".to_string(),
-                _ => "best".to_string(),
-            }
-        },
+    let separate = matches!(source, VideoSource::YouTube | VideoSource::Vimeo);
+    if quality == "best" {
+        return if separate {
+            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best".to_string()
+        } else if matches!(source, VideoSource::Other) {
+            "best[ext=mp4]/best".to_string()
+        } else {
+            "best[ext=mp4]/best".to_string()
+        };
+    }
+    let Some(height) = quality_height(quality) else {
+        return "best".to_string();
+    };
+    if separate {
+        format!("bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<={height}]+bestaudio/best[height<={height}]")
+    } else if matches!(source, VideoSource::Other) {
+        format!("best[height<={height}]/best")
+    } else {
+        format!("best[height<={height}][ext=mp4]/best[height<={height}]/best")
+    }
+}
+
+fn query_param(url: &str, key: &str) -> Option<String> {
+    let query = url.split_once('?')?.1;
+    let query = query.split('#').next().unwrap_or(query);
+    query
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .find(|(name, _)| *name == key)
+        .map(|(_, value)| value.to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn merged_output_path(line: &str) -> Option<String> {
+    let marker = "into \"";
+    let start = line.find(marker)? + marker.len();
+    let rest = &line[start..];
+    let end = rest.rfind('"')?;
+    let path = rest[..end].trim();
+    if path.is_empty() {
+        None
+    } else {
+        Some(path.to_string())
     }
 }
 
@@ -335,12 +317,70 @@ fn friendly_download_error(lines: &[String]) -> String {
     }
 }
 
-fn remove_partial_outputs(paths: &[String]) {
+/// Arquivo de formato separado que o yt-dlp junta depois, como `titulo.f137.mp4`.
+fn is_format_fragment(path: &str) -> bool {
+    std::path::Path::new(path)
+        .file_stem()
+        .and_then(|stem| std::path::Path::new(stem).extension())
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.len() > 1 && ext.starts_with('f') && ext[1..].chars().all(|c| c.is_ascii_digit()))
+        .unwrap_or(false)
+}
+
+/// Arquivos prontos: existem, não são pedaço de formato e, no modo áudio, já são MP3.
+fn finished_outputs(paths: &[String], audio: bool) -> Vec<String> {
+    let mut files: Vec<String> = Vec::new();
     for path in paths {
-        let _ = fs::remove_file(path);
+        if files.contains(path) || is_format_fragment(path) {
+            continue;
+        }
+        let is_mp3 = std::path::Path::new(path)
+            .extension()
+            .map(|ext| ext.eq_ignore_ascii_case("mp3"))
+            .unwrap_or(false);
+        if audio && !is_mp3 {
+            continue;
+        }
+        if std::path::Path::new(path).exists() {
+            files.push(path.clone());
+        }
+    }
+    files
+}
+
+/// Apaga sobras de itens que falharam. Os arquivos prontos ficam.
+fn remove_partial_outputs(paths: &[String], keep: &[String]) {
+    for path in paths {
+        if !keep.contains(path) {
+            let _ = fs::remove_file(path);
+        }
         let _ = fs::remove_file(format!("{path}.part"));
         let _ = fs::remove_file(format!("{path}.ytdl"));
     }
+}
+
+static DOWNLOAD_PID: Mutex<Option<u32>> = Mutex::new(None);
+static DOWNLOAD_CANCELLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn kill_process_tree(pid: u32) {
+    if cfg!(target_os = "windows") {
+        let mut cmd = Command::new("taskkill");
+        cmd.args(["/PID", &pid.to_string(), "/T", "/F"]);
+        configure_command(&mut cmd);
+        let _ = cmd.output();
+    } else {
+        let _ = Command::new("pkill").args(["-TERM", "-P", &pid.to_string()]).output();
+        let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).output();
+    }
+}
+
+/// Roda um comando fora do runtime async e espera a saída sem travar a interface.
+async fn run_output(mut cmd: Command) -> Result<std::process::Output, String> {
+    configure_command(&mut cmd);
+    async_runtime::spawn_blocking(move || cmd.output())
+        .await
+        .map_err(|e| format!("Erro ao esperar o yt-dlp: {}", e))?
+        .map_err(|e| format!("Erro ao executar yt-dlp: {}", e))
 }
 
 fn find_file_named(dir: &std::path::Path, name: &str) -> Option<PathBuf> {
@@ -685,7 +725,7 @@ pub struct CookiesResult {
     error: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct VideoItem {
     id: String,
     title: String,
@@ -756,41 +796,19 @@ async fn check_url_protection(url: String) -> Result<ProtectionResult, String> {
     wait_out_cooldown().await;
     let ytdlp = get_ytdlp_path();
     
-    // Usar canal para receber resultado de thread separada
-    let (tx, rx) = std::sync::mpsc::channel();
-    
-    std::thread::spawn(move || {
-        let mut cmd = Command::new(&ytdlp);
-        // Verificar os primeiros 5 itens da playlist para detectar se algum precisa de auth
-        cmd.args(&[
-            "--simulate",
-            "--ignore-errors",
-            "--socket-timeout", "10",
-            "--playlist-items", "1:5",
-            "--flat-playlist",
-            "-j",
-            &url
-        ]);
-        cmd.args(js_runtime_args());
-        configure_command(&mut cmd);
-        let result = cmd.output();
-        let _ = tx.send(result);
-    });
-    
-    // Aguardar resultado sem bloquear a UI usando yield
-    let output = loop {
-        match rx.try_recv() {
-            Ok(result) => break result,
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                // Yield para não bloquear - permite UI processar eventos
-                async_runtime::spawn(async {}).await.ok();
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                return Err("Thread desconectada".to_string());
-            }
-        }
-    }.map_err(|e| format!("Erro ao executar yt-dlp: {}. Verifique se está instalado.", e))?;
+    let mut cmd = Command::new(&ytdlp);
+    // Verificar os primeiros 5 itens da playlist para detectar se algum precisa de auth
+    cmd.args(&[
+        "--simulate",
+        "--ignore-errors",
+        "--socket-timeout", "10",
+        "--playlist-items", "1:5",
+        "--flat-playlist",
+        "-j",
+        &url
+    ]);
+    cmd.args(js_runtime_args());
+    let output = run_output(cmd).await?;
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -831,36 +849,17 @@ async fn verify_cookies(url: String, cookies_path: String) -> Result<CookiesResu
     wait_out_cooldown().await;
     let ytdlp = get_ytdlp_path();
     
-    let (tx, rx) = std::sync::mpsc::channel();
-    
-    std::thread::spawn(move || {
-        let mut cmd = Command::new(&ytdlp);
-        cmd.args(&[
-            "--simulate",
-            "--cookies", &cookies_path,
-            "--socket-timeout", "15",
-            "--playlist-items", "1",
-            "-j",
-            &url
-        ]);
-        cmd.args(js_runtime_args());
-        configure_command(&mut cmd);
-        let result = cmd.output();
-        let _ = tx.send(result);
-    });
-    
-    let output = loop {
-        match rx.try_recv() {
-            Ok(result) => break result,
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                async_runtime::spawn(async {}).await.ok();
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                return Err("Thread desconectada".to_string());
-            }
-        }
-    }.map_err(|e| format!("Erro ao executar yt-dlp: {}", e))?;
+    let mut cmd = Command::new(&ytdlp);
+    cmd.args(&[
+        "--simulate",
+        "--cookies", &cookies_path,
+        "--socket-timeout", "15",
+        "--playlist-items", "1",
+        "-j",
+        &url
+    ]);
+    cmd.args(js_runtime_args());
+    let output = run_output(cmd).await?;
 
     if output.status.success() {
         Ok(CookiesResult {
@@ -958,36 +957,17 @@ async fn check_firefox_youtube_cookies(url: String) -> Result<CookiesResult, Str
     wait_out_cooldown().await;
     let ytdlp = get_ytdlp_path();
     
-    let (tx, rx) = std::sync::mpsc::channel();
-    
-    std::thread::spawn(move || {
-        let mut cmd = Command::new(&ytdlp);
-        cmd.args(&[
-            "--simulate",
-            "--cookies-from-browser", "firefox",
-            "--socket-timeout", "15",
-            "--playlist-items", "1",
-            "-j",
-            &url
-        ]);
-        cmd.args(js_runtime_args());
-        configure_command(&mut cmd);
-        let result = cmd.output();
-        let _ = tx.send(result);
-    });
-    
-    let output = loop {
-        match rx.try_recv() {
-            Ok(result) => break result,
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                async_runtime::spawn(async {}).await.ok();
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                return Err("Thread desconectada".to_string());
-            }
-        }
-    }.map_err(|e| format!("Erro ao executar yt-dlp: {}", e))?;
+    let mut cmd = Command::new(&ytdlp);
+    cmd.args(&[
+        "--simulate",
+        "--cookies-from-browser", "firefox",
+        "--socket-timeout", "15",
+        "--playlist-items", "1",
+        "-j",
+        &url
+    ]);
+    cmd.args(js_runtime_args());
+    let output = run_output(cmd).await?;
 
     if output.status.success() {
         Ok(CookiesResult {
@@ -1043,29 +1023,9 @@ async fn analyze_url(url: String, radio_limit: u32, cookies_path: Option<String>
 
     args.push(url.clone());
 
-    // Executar em thread separada com canal
-    let (tx, rx) = std::sync::mpsc::channel();
-    
-    std::thread::spawn(move || {
-        let mut cmd = Command::new(&ytdlp);
-        cmd.args(&args);
-        configure_command(&mut cmd);
-        let result = cmd.output();
-        let _ = tx.send(result);
-    });
-    
-    let output = loop {
-        match rx.try_recv() {
-            Ok(result) => break result,
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                async_runtime::spawn(async {}).await.ok();
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                return Err("Thread desconectada".to_string());
-            }
-        }
-    }.map_err(|e| format!("Erro ao executar yt-dlp: {}", e))?;
+    let mut cmd = Command::new(&ytdlp);
+    cmd.args(&args);
+    let output = run_output(cmd).await?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1147,6 +1107,24 @@ async fn analyze_url(url: String, radio_limit: u32, cookies_path: Option<String>
                 });
             }
         }
+        // Link de vídeo dentro de playlist ou rádio: guarda o vídeo do link para a opção
+        // "Baixar só este vídeo". A URL fica sem `list=`, senão o yt-dlp baixa a lista toda.
+        if content_type == "video_with_playlist" || content_type == "video_with_radio" {
+            if let Some(video_id) = query_param(&url_clone, "v") {
+                let found = items.iter().find(|item| item.id == video_id).cloned();
+                let mut video = found.unwrap_or_else(|| VideoItem {
+                    id: video_id.clone(),
+                    title: "Vídeo do link".to_string(),
+                    url: String::new(),
+                    duration: None,
+                    channel: None,
+                    thumbnail: Some(format!("https://i.ytimg.com/vi/{}/default.jpg", video_id)),
+                    filesize: None,
+                });
+                video.url = format!("https://www.youtube.com/watch?v={}", video_id);
+                single_video = Some(video);
+            }
+        }
     } else {
         // Vídeo único
         if let Some(id) = json.get("id").and_then(|i| i.as_str()) {
@@ -1170,31 +1148,27 @@ async fn analyze_url(url: String, radio_limit: u32, cookies_path: Option<String>
     })
 }
 
+// Comando async: um `fn` comum rodaria na thread principal e congelaria a janela
+// enquanto o yt-dlp responde ou durante a espera depois de um bloqueio.
 #[tauri::command]
-fn get_formats(url: String, cookies_path: Option<String>, use_browser_cookies: Option<bool>) -> Result<FormatsResult, String> {
-    let pause = cooldown_remaining();
-    if !pause.is_zero() {
-        std::thread::sleep(pause);
-    }
+async fn get_formats(url: String, cookies_path: Option<String>, use_browser_cookies: Option<bool>) -> Result<FormatsResult, String> {
+    wait_out_cooldown().await;
     // Tentar obter formatos reais do yt-dlp
-    let ytdlp_path = get_ytdlp_exe_path();
-    
-    if ytdlp_path.exists() {
-        let mut cmd = Command::new(&ytdlp_path);
+    {
+        let mut cmd = Command::new(get_ytdlp_path());
         cmd.args(["-J"]);
         cmd.args(js_runtime_args());
-        
+
         // Cookies - usar do Firefox ou arquivo
         if use_browser_cookies.unwrap_or(false) {
             cmd.args(["--cookies-from-browser", "firefox"]);
         } else if let Some(ref cookies) = cookies_path {
             cmd.args(["--cookies", cookies]);
         }
-        
+
         cmd.arg(&url);
-        configure_command(&mut cmd);
-        
-        if let Ok(output) = cmd.output() {
+
+        if let Ok(output) = run_output(cmd).await {
             if !output.status.success() {
                 remember_block(&String::from_utf8_lossy(&output.stderr));
             }
@@ -1221,7 +1195,7 @@ fn get_formats(url: String, cookies_path: Option<String>, use_browser_cookies: O
                             if !is_image {
                             if let Some(height) = format.get("height").and_then(|h| h.as_i64()) {
                                 let resolution = format!("{}p", height);
-                                if !seen_resolutions.contains(&resolution) && height >= 360 {
+                                if !seen_resolutions.contains(&resolution) && height > 0 {
                                     seen_resolutions.insert(resolution.clone());
                                     video_formats.push(resolution);
                                 }
@@ -1242,9 +1216,14 @@ fn get_formats(url: String, cookies_path: Option<String>, use_browser_cookies: O
                     
                     // Ordenar por qualidade (maior primeiro)
                     video_formats.sort_by(|a, b| {
-                        let a_num: i32 = a.trim_end_matches('p').parse().unwrap_or(0);
-                        let b_num: i32 = b.trim_end_matches('p').parse().unwrap_or(0);
-                        b_num.cmp(&a_num)
+                        let rank = |label: &str| {
+                            if label == "best" {
+                                i32::MAX
+                            } else {
+                                label.trim_end_matches('p').parse().unwrap_or(0)
+                            }
+                        };
+                        rank(b).cmp(&rank(a))
                     });
                     
                     audio_formats.sort_by(|a, b| {
@@ -1303,19 +1282,27 @@ pub struct DownloadProgress {
     total: u32,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct DownloadOutcome {
+    files: Vec<String>,
+    /// Preenchido quando parte dos itens falhou ou o download foi cancelado.
+    warning: Option<String>,
+    cancelled: bool,
+}
+
 #[tauri::command]
-async fn start_download(app: AppHandle, options: DownloadOptions) -> Result<String, String> {
+async fn start_download(app: AppHandle, options: DownloadOptions) -> Result<DownloadOutcome, String> {
     run_download(options, |progress| {
         let _ = app.emit("download-progress", progress);
     })
     .await
-    .map(|_| "Download concluído com sucesso!".to_string())
 }
 
 async fn run_download(
     options: DownloadOptions,
     mut emit: impl FnMut(&DownloadProgress),
-) -> Result<Vec<String>, String> {
+) -> Result<DownloadOutcome, String> {
+    DOWNLOAD_CANCELLED.store(false, std::sync::atomic::Ordering::SeqCst);
     let pause = cooldown_remaining();
     if !pause.is_zero() {
         emit(&DownloadProgress {
@@ -1328,6 +1315,18 @@ async fn run_download(
             total: 1,
         });
         wait_out_cooldown().await;
+        if DOWNLOAD_CANCELLED.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            emit(&DownloadProgress {
+                status: "cancelled".to_string(),
+                progress: 0.0,
+                speed: "".to_string(),
+                eta: "".to_string(),
+                filename: "Download cancelado.".to_string(),
+                current: 0,
+                total: 1,
+            });
+            return Ok(DownloadOutcome { files: Vec::new(), warning: Some("Download cancelado.".to_string()), cancelled: true });
+        }
     }
     let ytdlp = get_ytdlp_path();
     let ffmpeg_location = locate_ffmpeg()
@@ -1464,7 +1463,14 @@ async fn run_download(
     configure_command(&mut cmd);
     let mut child = cmd.spawn()
         .map_err(|e| format!("Erro ao executar yt-dlp: {}", e))?;
-    
+    if let Ok(mut pid) = DOWNLOAD_PID.lock() {
+        *pid = Some(child.id());
+    }
+    // Cancelado entre a espera e o início do processo
+    if DOWNLOAD_CANCELLED.load(std::sync::atomic::Ordering::SeqCst) {
+        kill_process_tree(child.id());
+    }
+
     let stdout = child.stdout.take().ok_or("Falha ao capturar stdout")?;
     let stderr = child.stderr.take().ok_or("Falha ao capturar stderr")?;
     let stderr_task = std::thread::spawn(move || {
@@ -1556,6 +1562,9 @@ async fn run_download(
                     current_item = num;
                 }
             } else if line.contains("[Merger]") || line.contains("Merging formats") {
+                if let Some(path) = merged_output_path(&line) {
+                    output_paths.push(path);
+                }
                 emit(& DownloadProgress {
                     status: "merging".to_string(),
                     progress: 99.0,
@@ -1566,6 +1575,12 @@ async fn run_download(
                     total: total_items,
                 });
             } else if line.contains("[ExtractAudio]") {
+                if let Some(dest) = line.split("Destination:").nth(1) {
+                    let path = dest.trim();
+                    if !path.is_empty() {
+                        output_paths.push(path.to_string());
+                    }
+                }
                 emit(& DownloadProgress {
                     status: "converting".to_string(),
                     progress: 99.0,
@@ -1596,9 +1611,25 @@ async fn run_download(
     
     // Aguardar conclusão
     let stderr_lines = stderr_task.join().unwrap_or_default();
-    let status = child.wait().map_err(|e| format!("Erro ao aguardar processo: {}", e))?;
-    
-    if status.success() {
+    for line in &stderr_lines {
+        if let Some(path) = merged_output_path(line) {
+            output_paths.push(path);
+        }
+    }
+    let status = child.wait().map_err(|e| format!("Erro ao aguardar processo: {}", e));
+    if let Ok(mut pid) = DOWNLOAD_PID.lock() {
+        *pid = None;
+    }
+    let status = status?;
+    let cancelled = DOWNLOAD_CANCELLED.swap(false, std::sync::atomic::Ordering::SeqCst);
+
+    if let Some(ref batch_path) = batch_file_path {
+        let _ = fs::remove_file(batch_path);
+    }
+
+    let files = finished_outputs(&output_paths, options.mode == "audio");
+
+    if status.success() && !cancelled {
         emit(& DownloadProgress {
             status: "completed".to_string(),
             progress: 100.0,
@@ -1608,36 +1639,50 @@ async fn run_download(
             current: total_items,
             total: total_items,
         });
-        
-        // Limpar arquivo de batch se foi usado
-        if let Some(ref batch_path) = batch_file_path {
-            let _ = fs::remove_file(batch_path);
-        }
+        return Ok(DownloadOutcome { files, warning: None, cancelled: false });
+    }
 
-        let files = output_paths
-            .into_iter()
-            .filter(|path| std::path::Path::new(path).exists())
-            .collect();
-        Ok(files)
+    // Falhou ou foi cancelado: tira só as sobras. O que terminou fica na pasta.
+    remove_partial_outputs(&output_paths, &files);
+    let message = if cancelled {
+        "Download cancelado.".to_string()
     } else {
+        friendly_download_error(&stderr_lines)
+    };
+
+    if cancelled || !files.is_empty() {
         emit(& DownloadProgress {
-            status: "error".to_string(),
-            progress: 0.0,
+            status: if cancelled { "cancelled" } else { "partial" }.to_string(),
+            progress: 100.0,
             speed: "".to_string(),
             eta: "".to_string(),
-            filename: "Erro no download".to_string(),
-            current: current_item,
+            filename: message.clone(),
+            current: files.len() as u32,
             total: total_items,
         });
-        
-        // Limpar arquivo de batch mesmo em caso de erro
-        if let Some(ref batch_path) = batch_file_path {
-            let _ = fs::remove_file(batch_path);
-        }
-        
-        remove_partial_outputs(&output_paths);
-        Err(friendly_download_error(&stderr_lines))
+        return Ok(DownloadOutcome { files, warning: Some(message), cancelled });
     }
+
+    emit(& DownloadProgress {
+        status: "error".to_string(),
+        progress: 0.0,
+        speed: "".to_string(),
+        eta: "".to_string(),
+        filename: "Erro no download".to_string(),
+        current: current_item,
+        total: total_items,
+    });
+    Err(message)
+}
+
+#[tauri::command]
+fn cancel_download() -> Result<(), String> {
+    // A marca também vale durante a espera depois de um bloqueio, antes de o yt-dlp abrir.
+    DOWNLOAD_CANCELLED.store(true, std::sync::atomic::Ordering::SeqCst);
+    if let Some(pid) = DOWNLOAD_PID.lock().ok().and_then(|guard| *guard) {
+        kill_process_tree(pid);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1822,7 +1867,7 @@ async fn agent_main(args: Vec<String>) -> i32 {
             "formats" => {
                 let url = url.ok_or("Informe a URL")?;
                 ensure_tools().await?;
-                let result = get_formats(url, cookies, Some(firefox))?;
+                let result = get_formats(url, cookies, Some(firefox)).await?;
                 print_agent_json(&serde_json::json!({
                     "event": "result",
                     "ok": true,
@@ -1852,7 +1897,7 @@ async fn agent_main(args: Vec<String>) -> i32 {
                         Some(flags.items.clone())
                     },
                 };
-                let files = run_download(options, |progress| {
+                let outcome = run_download(options, |progress| {
                     if !flags.quiet {
                         print_agent_json(&serde_json::json!({
                             "event": "progress",
@@ -1864,9 +1909,10 @@ async fn agent_main(args: Vec<String>) -> i32 {
                 print_agent_json(&serde_json::json!({
                     "event": "result",
                     "ok": true,
-                    "files": files,
+                    "files": outcome.files,
+                    "warning": outcome.warning,
                 }));
-                Ok(0)
+                Ok(if outcome.warning.is_some() { 2 } else { 0 })
             }
             other => Err(format!("Comando desconhecido: {other}")),
         }
@@ -1994,7 +2040,7 @@ async fn mcp_call_tool(name: &str, args: &serde_json::Value) -> Result<serde_jso
         "list_formats" => {
             let url = mcp_arg_string(args, "url").ok_or("Informe url")?;
             ensure_tools().await?;
-            let formats = get_formats(url, cookies, Some(firefox))?;
+            let formats = get_formats(url, cookies, Some(firefox)).await?;
             Ok(serde_json::json!({ "ok": true, "formats": formats }))
         }
         "download" => {
@@ -2009,7 +2055,7 @@ async fn mcp_call_tool(name: &str, args: &serde_json::Value) -> Result<serde_jso
                 list.iter().filter_map(|item| item.as_str().map(|text| text.to_string())).collect::<Vec<_>>()
             });
             ensure_tools().await?;
-            let files = run_download(
+            let outcome = run_download(
                 DownloadOptions {
                     url,
                     destination,
@@ -2022,7 +2068,7 @@ async fn mcp_call_tool(name: &str, args: &serde_json::Value) -> Result<serde_jso
                 |_| {},
             )
             .await?;
-            Ok(serde_json::json!({ "ok": true, "files": files }))
+            Ok(serde_json::json!({ "ok": true, "files": outcome.files, "warning": outcome.warning }))
         }
         other => Err(format!("Ferramenta desconhecida: {other}")),
     }
@@ -2165,8 +2211,69 @@ pub fn run() {
             get_formats,
             get_download_paths,
             start_download,
+            cancel_download,
             open_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn query_param_reads_video_id() {
+        let url = "https://www.youtube.com/watch?v=abc123&list=PLxyz&index=2";
+        assert_eq!(query_param(url, "v").as_deref(), Some("abc123"));
+        assert_eq!(query_param(url, "list").as_deref(), Some("PLxyz"));
+        assert_eq!(query_param("https://youtu.be/abc", "v"), None);
+        assert_eq!(query_param("https://x.com/?v=", "v"), None);
+    }
+
+    #[test]
+    fn format_fragment_is_detected() {
+        assert!(is_format_fragment(r"C:\Videos\Titulo.f137.mp4"));
+        assert!(is_format_fragment("/tmp/Titulo.f251.webm"));
+        assert!(!is_format_fragment("/tmp/Titulo.mp4"));
+        assert!(!is_format_fragment("/tmp/Titulo.final.mp4"));
+        assert!(!is_format_fragment("/tmp/Titulo.f.mp4"));
+    }
+
+    #[test]
+    fn partial_failure_keeps_finished_files() {
+        let dir = env::temp_dir().join(format!("ytdlp-tauri-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let done = dir.join("Pronto.mp4").to_string_lossy().to_string();
+        let fragment = dir.join("Falhou.f137.mp4").to_string_lossy().to_string();
+        let part = dir.join("Falhou.mp4").to_string_lossy().to_string();
+        fs::write(&done, b"ok").unwrap();
+        fs::write(&fragment, b"x").unwrap();
+        fs::write(format!("{part}.part"), b"x").unwrap();
+
+        let paths = vec![done.clone(), fragment.clone(), part.clone()];
+        let files = finished_outputs(&paths, false);
+        assert_eq!(files, vec![done.clone()]);
+
+        remove_partial_outputs(&paths, &files);
+        assert!(std::path::Path::new(&done).exists());
+        assert!(!std::path::Path::new(&fragment).exists());
+        assert!(!std::path::Path::new(&format!("{part}.part")).exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn audio_mode_only_counts_mp3() {
+        let dir = env::temp_dir().join(format!("ytdlp-tauri-audio-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("Musica.webm").to_string_lossy().to_string();
+        let mp3 = dir.join("Musica.mp3").to_string_lossy().to_string();
+        fs::write(&source, b"x").unwrap();
+        fs::write(&mp3, b"x").unwrap();
+        let files = finished_outputs(&[source, mp3.clone()], true);
+        assert_eq!(files, vec![mp3]);
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

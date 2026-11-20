@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
 const props = defineProps({
@@ -7,7 +7,7 @@ const props = defineProps({
   destination: String,
 });
 
-const emit = defineEmits(["done"]);
+const emit = defineEmits(["done", "cancel", "back"]);
 
 const progressPercent = computed(() => {
   return Math.round(props.progress.percent || 0);
@@ -16,6 +16,42 @@ const progressPercent = computed(() => {
 const isCompleted = computed(() => {
   return props.progress.status === "completed";
 });
+
+// Terminou, mas não por completo: parte falhou, foi cancelado ou deu erro
+const isEnded = computed(() =>
+  ["partial", "cancelled", "error"].includes(props.progress.status)
+);
+
+const savedCount = computed(() => (props.progress.files || []).length);
+
+const endedTitle = computed(() => {
+  switch (props.progress.status) {
+    case "partial":
+      return "Download terminou com falhas";
+    case "cancelled":
+      return "Download cancelado";
+    default:
+      return "Erro no download";
+  }
+});
+
+const endedIcon = computed(() => {
+  switch (props.progress.status) {
+    case "partial":
+      return "⚠️";
+    case "cancelled":
+      return "⏹️";
+    default:
+      return "❌";
+  }
+});
+
+const cancelling = ref(false);
+
+function requestCancel() {
+  cancelling.value = true;
+  emit("cancel");
+}
 
 const statusText = computed(() => {
   switch (props.progress.status) {
@@ -104,6 +140,31 @@ async function openDownloadsFolder() {
           <span class="value eta">{{ progress.eta }}</span>
         </div>
       </div>
+
+      <button @click="requestCancel" class="btn-cancel" :disabled="cancelling">
+        {{ cancelling ? "Cancelando..." : "⏹ Cancelar" }}
+      </button>
+    </div>
+
+    <div v-else-if="isEnded" class="completed ended">
+      <div class="success-icon">{{ endedIcon }}</div>
+      <h2>{{ endedTitle }}</h2>
+      <p v-if="savedCount > 0">
+        {{ savedCount === 1 ? "1 arquivo foi salvo" : `${savedCount} arquivos foram salvos` }} na pasta.
+      </p>
+      <pre v-if="progress.message && progress.status !== 'cancelled'" class="error-details">{{ progress.message }}</pre>
+
+      <div class="actions">
+        <button v-if="savedCount > 0" @click="openDownloadsFolder" class="btn-open">
+          📂 Ver Downloads
+        </button>
+        <button @click="$emit('back')" class="btn-open">
+          ← Tentar de novo
+        </button>
+        <button @click="$emit('done')" class="btn-new">
+          🔄 Novo Download
+        </button>
+      </div>
     </div>
 
     <div v-else class="completed">
@@ -124,6 +185,40 @@ async function openDownloadsFolder() {
 </template>
 
 <style scoped>
+.btn-cancel {
+  margin-top: 24px;
+  padding: 10px 24px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.btn-cancel:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.btn-cancel:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.error-details {
+  max-width: 100%;
+  max-height: 140px;
+  overflow: auto;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+  font-size: 12px;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .step-progress {
   display: flex;
   flex-direction: column;

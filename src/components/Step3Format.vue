@@ -155,15 +155,23 @@ function selectQuality(q) {
 }
 
 const videoQualities = computed(() => {
-  const available = new Set(formats.value.video || []);
-  const qualities = [
-    { id: "best", label: "Melhor qualidade", desc: "Maior resolução disponível" },
-    { id: "1080p", label: "1080p (Full HD)", desc: "até 1080p de altura" },
-    { id: "720p", label: "720p (HD)", desc: "até 720p de altura" },
-    { id: "480p", label: "480p (SD)", desc: "até 480p de altura" },
-    { id: "360p", label: "360p", desc: "até 360p de altura" },
-  ];
-  return qualities.filter((q) => available.has(q.id));
+  const labels = {
+    best: ["Melhor qualidade", "Maior resolução disponível"],
+    "1080p": ["1080p (Full HD)", "até 1080p de altura"],
+    "720p": ["720p (HD)", "até 720p de altura"],
+    "480p": ["480p (SD)", "até 480p de altura"],
+    "360p": ["360p", "até 360p de altura"],
+    "240p": ["240p", "até 240p de altura"],
+    "144p": ["144p", "até 144p de altura"],
+  };
+  return (formats.value.video || []).map((id) => {
+    const known = labels[id];
+    return {
+      id,
+      label: known ? known[0] : id,
+      desc: known ? known[1] : `até ${id} de altura`,
+    };
+  });
 });
 
 const audioQualities = computed(() => [

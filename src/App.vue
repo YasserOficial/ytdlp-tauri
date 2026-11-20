@@ -51,6 +51,8 @@ const downloadProgress = ref({
   speed: "",
   eta: "",
   status: "",
+  message: "",
+  files: [],
 });
 
 // Listener para eventos de progresso do download
@@ -141,7 +143,12 @@ function startDownload() {
   downloadProgress.value.speed = "";
   downloadProgress.value.eta = "";
   downloadProgress.value.status = "starting";
-  
+  downloadProgress.value.message = "";
+
+  const selected = contentData.value.selectedItems
+    .map((item) => (item && typeof item === "object" ? item.url : item))
+    .filter(Boolean);
+
   // Chamar o comando Rust (o progresso vem via eventos)
   invoke("start_download", {
     options: {
@@ -151,17 +158,33 @@ function startDownload() {
       quality: formatData.value.quality,
       cookies_path: null,
       use_browser_cookies: authData.value.useBrowserCookies,
-      selected_items: contentData.value.selectedItems.length > 0 
-        ? contentData.value.selectedItems.map(item => typeof item === 'object' ? item.url : item)
-        : null,
+      selected_items: selected.length > 0 ? selected : null,
     }
-  }).then((result) => {
-    // Progresso final já é emitido pelo Rust
+  }).then((outcome) => {
+    downloadProgress.value.files = outcome.files || [];
+    if (outcome.cancelled) {
+      downloadProgress.value.status = "cancelled";
+    } else if (outcome.warning) {
+      downloadProgress.value.status = "partial";
+    } else {
+      downloadProgress.value.status = "completed";
+    }
+    downloadProgress.value.message = outcome.warning || "";
   }).catch((error) => {
     console.error("Erro no download:", error);
-    downloadProgress.value.currentFile = `Erro: ${error}`;
-    // Mostrar erro mas permitir novo download
+    downloadProgress.value.status = "error";
+    downloadProgress.value.message = String(error);
   });
+}
+
+function cancelDownload() {
+  invoke("cancel_download").catch((error) => console.error("Erro ao cancelar:", error));
+}
+
+// Volta ao passo da pasta com as escolhas mantidas, para tentar de novo
+function backToDestination() {
+  downloadProgress.value = { active: false, current: 0, total: 0, currentFile: "", percent: 0, message: "", files: [] };
+  currentStep.value = 4;
 }
 
 function resetWizard() {
@@ -171,7 +194,7 @@ function resetWizard() {
   contentData.value = { type: "", items: [], selectedItems: [] };
   formatData.value = { mode: "", quality: "", availableFormats: [] };
   destinationData.value = { path: "" };
-  downloadProgress.value = { active: false, current: 0, total: 0, currentFile: "", percent: 0 };
+  downloadProgress.value = { active: false, current: 0, total: 0, currentFile: "", percent: 0, message: "", files: [] };
 }
 
 // Gerar estilos aleatórios para os ícones flutuantes
@@ -309,6 +332,8 @@ function skipAuth() {
         :progress="downloadProgress"
         :destination="destinationData.path"
         @done="resetWizard"
+        @cancel="cancelDownload"
+        @back="backToDestination"
       />
     </div>
 
