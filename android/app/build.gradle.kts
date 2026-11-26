@@ -20,9 +20,10 @@ android {
         }
     }
 
-    // Assinatura de release. A chave e as senhas nunca vão para o repositório:
-    // vêm de variáveis de ambiente (no computador ou nos segredos do GitHub).
-    // Sem elas, o APK de release sai sem assinatura.
+    // Assinatura de release. Por padrão usa a chave de teste do computador
+    // (~/.android/debug.keystore), que o Android Studio cria sozinho: o app não
+    // guarda nada importante, então trocar de chave só obriga a reinstalar.
+    // Uma chave própria pode ser indicada por variáveis de ambiente.
     val keystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
     val releaseSigning = if (!keystorePath.isNullOrBlank()) {
         signingConfigs.create("release") {
@@ -31,7 +32,7 @@ android {
             keyAlias = System.getenv("ANDROID_KEY_ALIAS")
             keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
         }
-    } else null
+    } else signingConfigs.getByName("debug")
 
     buildTypes {
         release {

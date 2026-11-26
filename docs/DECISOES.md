@@ -35,6 +35,10 @@ O porquê das escolhas do YT-DLP GUI, para quem for mexer no projeto. O que mudo
 - **MCP com progresso e cancelamento.** As chamadas rodam em outra thread para o servidor continuar respondendo. É um download por vez, para o cancelamento saber qual processo parar.
 - **Descrições das ferramentas MCP em português, por enquanto.** O roadmap de idiomas prevê passá-las para inglês, que é o padrão do ecossistema.
 
+## Android no repositório
+
+- **Sem chave de assinatura própria.** O APK de release é assinado com a chave de teste do computador. O app não guarda nada importante, e reinstalar não é problema, então não vale o cuidado de guardar uma chave e uma senha para sempre. Se a chave mudar, a versão nova pede para desinstalar a antiga. Os APKs antigos já tinham sido assinados com uma chave de teste que não existe mais.
+
 ## Ambiente de build
 
 - **Windows com toolchain GNU.** O `gcc` precisa ser de 64 bits; com um de 32 bits no PATH, o `zstd-sys` não compila.

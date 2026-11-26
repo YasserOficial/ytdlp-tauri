@@ -1,14 +1,14 @@
 # Roadmap
 
-Os planos maiores do YT-DLP GUI. Cada item tem o porquê, como fica e as fases. Nada aqui está em execução ainda. O motivo das escolhas já feitas está em [DECISOES.md](DECISOES.md).
+Os planos maiores do YT-DLP GUI. Cada item tem o porquê, como fica e as fases. A unificação está em andamento; o resto ainda não começou. O motivo das escolhas já feitas está em [DECISOES.md](DECISOES.md).
 
 | Item | Situação | Detalhes |
 |---|---|---|
-| Unificação dos projetos no GitHub (desktop + Android) | Planejado | nesta página |
+| Unificação dos projetos no GitHub (desktop + Android) | Em andamento (fases 1 e 2 prontas) | nesta página |
 | Atualização automática do app pelo GitHub | Planejado | nesta página |
 | Suporte a vários idiomas (português e inglês primeiro) | Planejado | [ROADMAP-idiomas.md](ROADMAP-idiomas.md) |
 
-**Ordem sugerida:** primeiro a unificação, porque ela traz a chave de assinatura do Android e os builds automáticos no GitHub, e a atualização automática depende dos dois. Depois a atualização automática. Os idiomas por último, já cobrindo as três plataformas de uma vez.
+**Ordem sugerida:** primeiro a unificação, porque ela traz os builds automáticos no GitHub, e a atualização automática depende deles. Depois a atualização automática. Os idiomas por último, já cobrindo as três plataformas de uma vez.
 
 ---
 
@@ -34,17 +34,17 @@ ytdlp-tauri/
 
 ### Atenção antes de começar
 
-1. **Chave de assinatura do Android.** O projeto não tem uma. Sem chave fixa, cada APK pode sair com uma assinatura diferente, e o Android recusa atualizar por cima: a pessoa precisa desinstalar e perde os dados. A chave nunca vai para o repositório. **Se ela for perdida, nunca mais dá para publicar atualizações do mesmo app.** Guardar em dois lugares seguros.
+1. **Assinatura do Android.** Decidido: sem chave própria. O APK é assinado com a chave de teste do computador (`~/.android/debug.keystore`). O app não guarda nada importante, então, se a chave mudar (computador formatado, build em outra máquina), basta desinstalar e instalar de novo. Uma chave própria continua possível pelas variáveis `ANDROID_KEYSTORE_*`.
 2. **O que não entra no Git:** builds, `.gradle`, `local.properties`, os APKs, o `ytdlp.zip` e a pasta `.github/java-upgrade` (registros de uma ferramenta, não automação). O `.gitignore` do projeto já cobre quase tudo; o código tem só 463 KB.
 
 ### Fases
 
-1. **Chave e assinatura.** Criar a chave de release do Android e configurar o Gradle para assinar lendo a senha de variáveis de ambiente.
-2. **Entrada no repositório.** Copiar o projeto para `android/`, limpo, num commit próprio.
+1. **Assinatura.** ✅ O release assina com a chave de teste do computador, ou com uma chave indicada por variáveis de ambiente.
+2. **Entrada no repositório.** ✅ Projeto em `android/`, limpo, num commit próprio.
 3. **Versão alinhada.** O Android adota o número do desktop na próxima release.
 4. **README único.** Seção Android (requisitos, instalar APK fora da loja, login pelo navegador interno) e downloads das três plataformas.
 5. **Releases com APK.** Universal e só arm64.
-6. **Builds automáticos (GitHub Actions).** O APK é o mais simples, com a chave nos segredos do GitHub. Depois o `.deb` e o Windows. Isso também prepara a atualização automática, que precisa de arquivos assinados em toda release.
+6. **Builds automáticos (GitHub Actions).** O APK é o mais simples. Cada máquina do GitHub tem uma chave de teste diferente, então para o APK não mudar de assinatura a cada versão vale guardar a chave de teste deste computador nos segredos do GitHub. Depois o `.deb` e o Windows. Isso também prepara a atualização automática, que precisa de arquivos assinados em toda release.
 
 **Fica fora:** reescrever o Android com Tauri para ter código único. O yt-dlp no Android precisa de um Python embutido, que é o que a youtubedl-android resolve; seria praticamente refazer o app.
 
@@ -62,7 +62,7 @@ ytdlp-tauri/
 - **Linux (`.deb`):** o plugin do Tauri não atualiza `.deb`. Opções, a decidir:
   - o app só avisa e abre a página da release (mais simples);
   - publicar também um **AppImage**, que o plugin atualiza sozinho.
-- **Android:** o app consulta a última release pela API do GitHub e oferece baixar o APK novo. A instalação passa pela tela do próprio Android (precisa da permissão de instalar apps de outras fontes). Só funciona com a chave de assinatura fixa da unificação.
+- **Android:** o app consulta a última release pela API do GitHub e oferece baixar o APK novo. A instalação passa pela tela do próprio Android (precisa da permissão de instalar apps de outras fontes). Se a assinatura mudar entre versões, o Android recusa instalar por cima e o app precisa orientar a desinstalar antes.
 - **Agente:** o instalado é atualizado junto com o app. O avulso ganha um aviso no `tools` quando há versão nova e, talvez, um comando `self-update`.
 
 ### Experiência na interface
