@@ -38,11 +38,11 @@ Um assistente em passos: cole o link, escolha o que baixar, o formato e a pasta.
 
 ## Como baixar
 
-A versão atual é a **0.1.8**, em [Releases](https://github.com/YasserOficial/ytdlp-tauri/releases/tag/v0.1.8).
+A versão atual é a **0.1.9**, em [Releases](https://github.com/YasserOficial/ytdlp-tauri/releases/tag/v0.1.9).
 
-- **Windows:** `YT-DLP GUI_0.1.8_x64-setup.exe` (instalador NSIS). O `.msi` é a alternativa. O instalador pede permissão de administrador.
-- **Linux (Ubuntu 24.04 e derivados):** `YT-DLP GUI_0.1.8_amd64.deb`. Instale com `sudo apt install ./YT-DLP\ GUI_0.1.8_amd64.deb` para o apt trazer o WebKitGTK. O pacote depende de `libwebkit2gtk-4.1-0` e `libgtk-3-0`. No Ubuntu 22.04 esses nomes não existem, então este `.deb` não serve lá.
-- **Android 7.0 ou mais novo:** o APK entra nas releases a partir da próxima versão. Veja [No Android](#no-android).
+- **Windows:** `YT-DLP GUI_0.1.9_x64-setup.exe` (instalador NSIS). O `.msi` é a alternativa. O instalador pede permissão de administrador.
+- **Linux (Ubuntu 24.04 e derivados):** `YT-DLP GUI_0.1.9_amd64.deb`. Instale com `sudo apt install ./YT-DLP\ GUI_0.1.9_amd64.deb` para o apt trazer o WebKitGTK. O pacote depende de `libwebkit2gtk-4.1-0` e `libgtk-3-0`. No Ubuntu 22.04 esses nomes não existem, então este `.deb` não serve lá.
+- **Android 7.0 ou mais novo:** `YT-DLP-GUI_0.1.9_android-universal.apk` funciona em qualquer aparelho; `YT-DLP-GUI_0.1.9_android-arm64.apk` é menor e serve para quase todos os celulares atuais. Veja [No Android](#no-android).
 - **Agente:** `ytdlp-tauri-agent-windows-x64.zip` ou `ytdlp-tauri-agent-linux-x64.tar.gz`. É o mesmo programa sem a janela: comando manual ou servidor MCP.
 
 ## Como usar
