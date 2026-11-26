@@ -4,7 +4,7 @@ Os planos maiores do YT-DLP GUI. Cada item tem o porquê, como fica e as fases. 
 
 | Item | Situação | Detalhes |
 |---|---|---|
-| Unificação dos projetos no GitHub (desktop + Android) | Em andamento (fases 1 a 4 prontas) | nesta página |
+| Unificação dos projetos no GitHub (desktop + Android) | Em andamento (fases 1 a 5 prontas) | nesta página |
 | Atualização automática do app pelo GitHub | Planejado | nesta página |
 | Suporte a vários idiomas (português e inglês primeiro) | Planejado | [ROADMAP-idiomas.md](ROADMAP-idiomas.md) |
 
@@ -42,8 +42,8 @@ ytdlp-tauri/
 1. **Assinatura.** ✅ O release assina com a chave de teste do computador, ou com uma chave indicada por variáveis de ambiente.
 2. **Entrada no repositório.** ✅ Projeto em `android/`, limpo, num commit próprio.
 3. **Versão alinhada.** ✅ O Gradle lê a versão do `package.json` da raiz; o `versionCode` sai dela (0.1.8 → 108). Subir a versão do desktop já sobe a do Android.
-4. **README único.** ✅ Seção "No Android" (instalar o APK fora da loja, reinstalar se a assinatura mudar, login pelo navegador interno), Android em "Como baixar" e o build do APK em "Desenvolvimento". O README antigo de `android/` saiu. Os nomes dos arquivos do APK entram em "Como baixar" na fase 5.
-5. **Releases com APK.** Universal e só arm64.
+4. **README único.** ✅ Seção "No Android" (instalar o APK fora da loja, reinstalar se a assinatura mudar, login pelo navegador interno), Android em "Como baixar" e o build do APK em "Desenvolvimento". O README antigo de `android/` saiu.
+5. **Releases com APK.** ✅ Desde a 0.1.9: `YT-DLP-GUI_<versão>_android-universal.apk` e `YT-DLP-GUI_<versão>_android-arm64.apk`.
 6. **Builds automáticos (GitHub Actions).** O APK é o mais simples. Cada máquina do GitHub tem uma chave de teste diferente, então para o APK não mudar de assinatura a cada versão vale guardar a chave de teste deste computador nos segredos do GitHub. Depois o `.deb` e o Windows. Isso também prepara a atualização automática, que precisa de arquivos assinados em toda release.
 
 **Fica fora:** reescrever o Android com Tauri para ter código único. O yt-dlp no Android precisa de um Python embutido, que é o que a youtubedl-android resolve; seria praticamente refazer o app.
