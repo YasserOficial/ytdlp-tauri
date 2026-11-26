@@ -3,6 +3,15 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// A versão vem do package.json do desktop, para uma versão valer para todas
+// as plataformas. O versionCode é derivado dela (0.1.8 → 108) e só cresce.
+val appVersion: String = Regex("\"version\"\\s*:\\s*\"([^\"]+)\"")
+    .find(rootProject.file("../package.json").readText())
+    ?.groupValues?.get(1)
+    ?: error("Versão não encontrada no package.json da raiz")
+val appVersionCode: Int = appVersion.split(".").map { part -> part.takeWhile { it.isDigit() }.toInt() }
+    .let { (major, minor, patch) -> major * 10000 + minor * 100 + patch }
+
 android {
     namespace = "com.ytdlp.gui"
     compileSdk = 34
@@ -11,8 +20,8 @@ android {
         applicationId = "com.ytdlp.gui"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = appVersionCode
+        versionName = appVersion
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
