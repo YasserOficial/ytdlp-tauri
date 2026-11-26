@@ -5,9 +5,9 @@
 <h1 align="center">YT-DLP GUI</h1>
 
 <p align="center">
-  Interface gráfica para Windows e Linux que baixa vídeo e áudio com
+  Interface gráfica para Windows, Linux e Android que baixa vídeo e áudio com
   <a href="https://github.com/yt-dlp/yt-dlp">yt-dlp</a> e FFmpeg.
-  O mesmo fluxo existe sem janela, para script e agente.
+  No computador, o mesmo fluxo existe sem janela, para script e agente.
 </p>
 
 <p align="center">
@@ -15,6 +15,7 @@
   <img alt="Vue 3" src="https://img.shields.io/badge/Vue-3-4FC08D?logo=vuedotjs&logoColor=white">
   <img alt="Windows" src="https://img.shields.io/badge/Windows-10%2F11-0078D6?logo=windows&logoColor=white">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-Ubuntu%2024.04-E95420?logo=linux&logoColor=white">
+  <img alt="Android" src="https://img.shields.io/badge/Android-7.0%2B-3DDC84?logo=android&logoColor=white">
 </p>
 
 <p align="center">
@@ -41,6 +42,7 @@ A versão atual é a **0.1.8**, em [Releases](https://github.com/YasserOficial/y
 
 - **Windows:** `YT-DLP GUI_0.1.8_x64-setup.exe` (instalador NSIS). O `.msi` é a alternativa. O instalador pede permissão de administrador.
 - **Linux (Ubuntu 24.04 e derivados):** `YT-DLP GUI_0.1.8_amd64.deb`. Instale com `sudo apt install ./YT-DLP\ GUI_0.1.8_amd64.deb` para o apt trazer o WebKitGTK. O pacote depende de `libwebkit2gtk-4.1-0` e `libgtk-3-0`. No Ubuntu 22.04 esses nomes não existem, então este `.deb` não serve lá.
+- **Android 7.0 ou mais novo:** o APK entra nas releases a partir da próxima versão. Veja [No Android](#no-android).
 - **Agente:** `ytdlp-tauri-agent-windows-x64.zip` ou `ytdlp-tauri-agent-linux-x64.tar.gz`. É o mesmo programa sem a janela: comando manual ou servidor MCP.
 
 ## Como usar
@@ -54,6 +56,17 @@ A versão atual é a **0.1.8**, em [Releases](https://github.com/YasserOficial/y
 7. Escolha a pasta e comece o download.
 
 As ferramentas ficam em `%LOCALAPPDATA%\ytdlp-tauri\tools` no Windows e em `~/.local/share/ytdlp-tauri/tools` no Linux (`$XDG_DATA_HOME`, se estiver definido).
+
+## No Android
+
+O app Android tem os mesmos passos, com o yt-dlp e o FFmpeg já dentro do APK. Ele não está na Play Store, que não aceita apps desse tipo; a instalação é pelo APK da release.
+
+1. Baixe o APK no celular. O **universal** funciona em qualquer aparelho; o **arm64** é menor e serve para quase todos os celulares atuais.
+2. Abra o arquivo. Na primeira vez, o Android pede para permitir a instalação a partir do navegador ou do gerenciador de arquivos.
+3. Se já tiver uma versão antiga instalada e o Android disser que o app não é compatível, desinstale a antiga e instale de novo. O app não guarda nada importante.
+4. Na primeira abertura, o app prepara o yt-dlp e oferece atualizá-lo.
+
+Para conteúdo que pede login no YouTube, no Instagram ou no X, o app abre o site num navegador interno e guarda os cookies depois que você entra. Os arquivos podem ir para a pasta de Downloads, Músicas ou Vídeos do celular, ou para uma pasta só do app.
 
 ## Uso por agentes
 
@@ -142,6 +155,15 @@ Os pacotes saem em `src-tauri/target/release/bundle/`.
 
 Se o Rust no Windows estiver no toolchain GNU (`x86_64-pc-windows-gnu`), crie `src-tauri/.cargo/config.toml` apontando `linker` e `ar` para o `gcc.exe` e o `ar.exe` do MinGW. Esse arquivo é local e fica fora do Git.
 
+Para gerar o APK do Android, com [Java](https://adoptium.net/) 17+ e o SDK do Android (o do Android Studio serve), indicado em `android/local.properties` como `sdk.dir=C:/Users/.../Android/Sdk`:
+
+```powershell
+cd android
+.\gradlew.bat assembleRelease
+```
+
+No Linux, `./gradlew assembleRelease`. Os APKs saem em `android/app/build/outputs/apk/release/`: um universal e um por arquitetura. A versão vem do `package.json` da raiz. O APK é assinado com a chave de teste do computador (`~/.android/debug.keystore`); para usar outra, defina `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` e `ANDROID_KEY_PASSWORD`.
+
 Para regenerar os ícones a partir de `src-tauri/icons/icon.png`:
 
 ```powershell
@@ -155,6 +177,8 @@ src/                          interface Vue (passos do assistente)
 src-tauri/src/                comandos Rust: ferramentas, análise e download
 src-tauri/src/bin/            ytdlp-tauri-agent, uso manual e MCP
 src-tauri/icons/              ícones do aplicativo
+android/                      app Android (Kotlin e Jetpack Compose)
+docs/                         decisões e roadmap
 ```
 
 ## Aviso
